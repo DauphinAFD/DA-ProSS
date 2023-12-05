@@ -46,39 +46,64 @@ def train(cfg, local_rank, distributed, logger):
     feature_extractor = build_feature_extractor(cfg)
     feature_extractor.to(device)
 
-    classifier = build_classifier(cfg)
-    classifier.to(device)
+
+    depth_extractor = build_depth_extractor(cfg)
+    depth_extractor.to(device)  
+
+    seg_extractor = build_seg_extractor(cfg)
+    seg_extractor.to(device)  
+
+    depth_classifier = build_classifier(cfg)
+    depth_classifier.to(device)
+
+    seg_classifier = build_classifier(cfg)
+    seg_classifier.to(device)
 
 
     # batch size: half for source and half for target
     batch_size = cfg.SOLVER.BATCH_SIZE // 2
 
     logger.info(feature_extractor)
-    logger.info(classifier)
+    logger.info(depth_extractor)
+    logger.info(seg_extractor)
+    logger.info(depth_classifier)
+    logger.info(seg_classifier)
 
 
-    # init optimizer
+    # init optimizers
     optimizer_fea = torch.optim.SGD(feature_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    optimizer_cls = torch.optim.SGD(classifier.parameters(), lr=cfg.SOLVER.BASE_LR * 10, momentum=cfg.SOLVER.MOMENTUM,
+    optimizer_dep_ext = torch.optim.SGD(depth_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
-    optimizer_cls.zero_grad()
+    optimizer_dep_ext.zero_grad()
+
+    optimizer_seg_ext = torch.optim.SGD(seg_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
+                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    optimizer_seg_ext.zero_grad()
+
+    optimizer_dep_cls = torch.optim.SGD(depth_classifier.parameters(), lr=cfg.SOLVER.BASE_LR * 10, momentum=cfg.SOLVER.MOMENTUM,
+                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    optimizer_dep_cls.zero_grad()
+
+    optimizer_seg_cls = torch.optim.SGD(seg_classifier.parameters(), lr=cfg.SOLVER.BASE_LR * 10, momentum=cfg.SOLVER.MOMENTUM,
+                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    optimizer_seg_cls.zero_grad()
 
     output_dir = cfg.OUTPUT_DIR
 
 
     # load checkpoint
-    if cfg.resume:
-        logger.info("Loading checkpoint from {}".format(cfg.resume))
-        checkpoint = torch.load(cfg.resume, map_location=torch.device('cpu'))
-        feature_weights = checkpoint['feature_extractor'] if distributed else strip_prefix_if_present(
-            checkpoint['feature_extractor'], 'module.')
-        feature_extractor.load_state_dict(feature_weights)
-        classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
-            checkpoint['classifier'], 'module.')
-        classifier.load_state_dict(classifier_weights)
+    # if cfg.resume:
+    #     logger.info("Loading checkpoint from {}".format(cfg.resume))
+    #     checkpoint = torch.load(cfg.resume, map_location=torch.device('cpu'))
+    #     feature_weights = checkpoint['feature_extractor'] if distributed else strip_prefix_if_present(
+    #         checkpoint['feature_extractor'], 'module.')
+    #     feature_extractor.load_state_dict(feature_weights)
+    #     classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
+    #         checkpoint['classifier'], 'module.')
+    #     classifier.load_state_dict(classifier_weights)
 
 
     # init data loader
@@ -120,7 +145,11 @@ def train(cfg, local_rank, distributed, logger):
 
     logger.info(">>>>>>>>>>>>>>>> Start Training >>>>>>>>>>>>>>>>")
     feature_extractor.train()
-    classifier.train()
+    depth_extractor.train()
+    seg_extractor.train()
+    depth_classifier.train()
+    seg_classifier.train()
+
     best_mIoU = 0
     best_iteration = 0
 
@@ -132,12 +161,23 @@ def train(cfg, local_rank, distributed, logger):
                                           power=cfg.SOLVER.LR_POWER)
         for index in range(len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr
-        for index in range(len(optimizer_cls.param_groups)):
-            optimizer_cls.param_groups[index]['lr'] = current_lr * 10
+        for index in range(len(optimizer_dep_ext.param_groups)):
+            optimizer_dep_ext.param_groups[index]['lr'] = current_lr
+        for index in range(len(optimizer_seg_ext.param_groups)):
+            optimizer_seg_ext.param_groups[index]['lr'] = current_lr
+        
+        for index in range(len(optimizer_dep_cls.param_groups)):
+            optimizer_dep_cls.param_groups[index]['lr'] = current_lr * 10
+        for index in range(len(optimizer_seg_cls.param_groups)):
+            optimizer_seg_cls.param_groups[index]['lr'] = current_lr * 10
 
 
         optimizer_fea.zero_grad()
-        optimizer_cls.zero_grad()
+        optimizer_dep_ext.zero_grad()
+        optimizer_seg_ext.zero_grad()
+        optimizer_dep_cls.zero_grad()
+        optimizer_seg_cls.zero_grad()
+
 
         src_input = src_input.cuda(non_blocking=True)
         src_label = src_label.cuda(non_blocking=True).long()
@@ -147,12 +187,21 @@ def train(cfg, local_rank, distributed, logger):
 
         # Source feature and classifier outputs
         src_feat = feature_extractor(src_input)
-        src_out = classifier(src_feat)
+        src_depth_feat = depth_extractor(src_input)
+        src_seg_feat = seg_extractor(src_input)
+
+        src_depth_out = depth_classifier(src_depth_feat)
+        src_seg_out = seg_classifier(src_depth_feat)
 
         # Target feature and classifier outputs
         tgt_feat = feature_extractor(tgt_input)
-        tgt_out = classifier(tgt_feat)
+        tgt_depth_feat = depth_extractor(tgt_input)
+        tgt_seg_feat = seg_extractor(tgt_input)
 
+        tgt_depth_out = depth_classifier(tgt_depth_feat)
+        tgt_seg_out = seg_classifier(tgt_depth_feat)
+
+# ----------------------------------------------------------------------------
         # Supervision loss
         src_pred = F.interpolate(src_out, size=src_size, mode='bilinear', align_corners=True)
         if cfg.SOLVER.LAMBDA_LOV > 0:

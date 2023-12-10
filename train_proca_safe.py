@@ -46,18 +46,21 @@ def train(cfg, local_rank, distributed, logger):
     feature_extractor = build_feature_extractor(cfg)
     feature_extractor.to(device)
 
-
-    depth_extractor = build_depth_extractor(cfg)
+    depth_extractor = build_task_extractor(cfg)
     depth_extractor.to(device)  
 
-    seg_extractor = build_seg_extractor(cfg)
+    seg_extractor = build_task_extractor(cfg)
     seg_extractor.to(device)  
+
+    dep_to_seg = 
+    dep_to_seg.to(device)
 
     depth_classifier = build_classifier(cfg)
     depth_classifier.to(device)
 
     seg_classifier = build_classifier(cfg)
     seg_classifier.to(device)
+
 
 
     # batch size: half for source and half for target
@@ -82,6 +85,10 @@ def train(cfg, local_rank, distributed, logger):
     optimizer_seg_ext = torch.optim.SGD(seg_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_seg_ext.zero_grad()
+
+    optimizer_dep_to_seg = torch.optim.SGD(dep_to_seg.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
+                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    optimizer_dep_to_seg.zero_grad()
 
     optimizer_dep_cls = torch.optim.SGD(depth_classifier.parameters(), lr=cfg.SOLVER.BASE_LR * 10, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
@@ -126,10 +133,11 @@ def train(cfg, local_rank, distributed, logger):
     pcl_criterion = PrototypeContrastiveLoss(cfg)
 
 
-    # load init source prototypes
     logger.info(">>>>>>>>>>>>>>>> Load init prototypes >>>>>>>>>>>>>>>>")
     _, backbone_name = cfg.MODEL.NAME.split('_')
     feature_num = 2048 if backbone_name.startswith('resnet') else 1024
+
+    # Create prototypes
     feat_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
     if cfg.SOLVER.MULTI_LEVEL:
         out_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, cfg=cfg)
@@ -144,16 +152,20 @@ def train(cfg, local_rank, distributed, logger):
 
 
     logger.info(">>>>>>>>>>>>>>>> Start Training >>>>>>>>>>>>>>>>")
+
     feature_extractor.train()
     depth_extractor.train()
     seg_extractor.train()
+    dep_to_seg.train()
     depth_classifier.train()
     seg_classifier.train()
 
     best_mIoU = 0
     best_iteration = 0
 
-    for i, ((src_input, src_label, src_name), (tgt_input, _, _)) in enumerate(zip(src_train_loader, tgt_train_loader)):
+
+    # Modify data loader
+    for i, ((src_input, src_depth_label, src_seg_label, src_name), (tgt_input, tgt_depth_label,_, _)) in enumerate(zip(src_train_loader, tgt_train_loader)):
         data_time = time.time() - end
 
         # Custom Leaning rate adjustment
@@ -165,7 +177,8 @@ def train(cfg, local_rank, distributed, logger):
             optimizer_dep_ext.param_groups[index]['lr'] = current_lr
         for index in range(len(optimizer_seg_ext.param_groups)):
             optimizer_seg_ext.param_groups[index]['lr'] = current_lr
-        
+        for index in range(len(optimizer_dep_to_seg.param_groups)):
+            optimizer_dep_to_seg.param_groups[index]['lr'] = current_lr
         for index in range(len(optimizer_dep_cls.param_groups)):
             optimizer_dep_cls.param_groups[index]['lr'] = current_lr * 10
         for index in range(len(optimizer_seg_cls.param_groups)):
@@ -175,32 +188,37 @@ def train(cfg, local_rank, distributed, logger):
         optimizer_fea.zero_grad()
         optimizer_dep_ext.zero_grad()
         optimizer_seg_ext.zero_grad()
+        optimizer_dep_to_seg.zero_grad()
         optimizer_dep_cls.zero_grad()
         optimizer_seg_cls.zero_grad()
 
 
         src_input = src_input.cuda(non_blocking=True)
-        src_label = src_label.cuda(non_blocking=True).long()
+        src_depth_label = src_depth_label.cuda(non_blocking=True)
+        src_seg_label = src_seg_label.cuda(non_blocking=True).long()
         tgt_input = tgt_input.cuda(non_blocking=True)
-
+        tgt_depth_label = tgt_depth_label.cuda(non_blocking=True)
         src_size = src_input.shape[-2:]
 
         # Source feature and classifier outputs
         src_feat = feature_extractor(src_input)
-        src_depth_feat = depth_extractor(src_input)
-        src_seg_feat = seg_extractor(src_input)
+
+        src_depth_feat = depth_extractor(src_feat)
+        src_seg_feat = seg_extractor(src_feat)
 
         src_depth_out = depth_classifier(src_depth_feat)
-        src_seg_out = seg_classifier(src_depth_feat)
+        src_seg_out = seg_classifier(src_seg_feat)
 
         # Target feature and classifier outputs
         tgt_feat = feature_extractor(tgt_input)
-        tgt_depth_feat = depth_extractor(tgt_input)
-        tgt_seg_feat = seg_extractor(tgt_input)
+
+        tgt_depth_feat = depth_extractor(tgt_feat)
+        tgt_seg_feat = seg_extractor(tgt_feat)
 
         tgt_depth_out = depth_classifier(tgt_depth_feat)
-        tgt_seg_out = seg_classifier(tgt_depth_feat)
+        tgt_seg_out = seg_classifier(tgt_seg_feat)
 
+        # Modify flow of blocks
 # ----------------------------------------------------------------------------
         # Supervision loss
         src_pred = F.interpolate(src_out, size=src_size, mode='bilinear', align_corners=True)
@@ -231,9 +249,10 @@ def train(cfg, local_rank, distributed, logger):
         tgt_feat = tgt_feat.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, A)
 
 
-        # update feature-level statistics
+        # Update feature-level prototype xstatistics
         feat_estimator.update(features=tgt_feat.detach(), labels=tgt_mask)
         feat_estimator.update(features=src_feat.detach(), labels=src_mask)
+
 
         # contrastive loss on both domains
         loss_feat = pcl_criterion(Proto=feat_estimator.Proto.detach(),
@@ -267,10 +286,15 @@ def train(cfg, local_rank, distributed, logger):
         else:
             loss = loss_sup + cfg.SOLVER.LAMBDA_FEAT * loss_feat
 
+
         loss.backward()
 
         optimizer_fea.step()
-        optimizer_cls.step()
+        optimizer_dep_ext.step()
+        optimizer_seg_ext.step()
+        optimizer_dep_to_seg.step()
+        optimizer_dep_cls.step()
+        optimizer_seg_cls.step()
 
         batch_time = time.time() - end
         end = time.time()
@@ -334,6 +358,8 @@ def train(cfg, local_rank, distributed, logger):
     )
 
     return feature_extractor, classifier
+
+
 
 
 def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger):

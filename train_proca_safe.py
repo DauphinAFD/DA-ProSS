@@ -5,6 +5,7 @@ import logging
 import time
 import numpy as np
 from collections import OrderedDict
+import wandb
 
 import torch
 import torch.utils
@@ -42,61 +43,35 @@ def strip_prefix_if_present(state_dict, prefix):
 def train(cfg, local_rank, distributed, logger):
     device = torch.device(cfg.MODEL.DEVICE)
 
+    # Initialize wandb
+    run = wandb.init(
+        project = 'DA-ProSS',
+        config = cfg,
+        name = cfg.run_name
+    )
+
     # create network
     feature_extractor = build_feature_extractor(cfg)
     feature_extractor.to(device)
 
-    depth_extractor = build_task_extractor(cfg)
-    depth_extractor.to(device)  
-
-    seg_extractor = build_task_extractor(cfg)
-    seg_extractor.to(device)  
-
-    dep_to_seg = 
-    dep_to_seg.to(device)
-
-    depth_classifier = build_classifier(cfg)
-    depth_classifier.to(device)
-
-    seg_classifier = build_classifier(cfg)
-    seg_classifier.to(device)
-
-
+    classifier = build_classifier(cfg)
+    classifier.to(device)
 
     # batch size: half for source and half for target
     batch_size = cfg.SOLVER.BATCH_SIZE // 2
 
     logger.info(feature_extractor)
-    logger.info(depth_extractor)
-    logger.info(seg_extractor)
-    logger.info(depth_classifier)
-    logger.info(seg_classifier)
+    logger.info(classifier)
 
 
     # init optimizers
-    optimizer_fea = torch.optim.SGD(feature_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
+    optimizer_fea = torch.optim.SGD(feature_extractor.optim_parameters(cfg.SOLVER.BASE_LR), momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    optimizer_dep_ext = torch.optim.SGD(depth_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
+    optimizer_cls = torch.optim.SGD(classifier.optim_parameters(cfg.SOLVER.BASE_LR) * 10, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
-    optimizer_dep_ext.zero_grad()
-
-    optimizer_seg_ext = torch.optim.SGD(seg_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
-                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
-    optimizer_seg_ext.zero_grad()
-
-    optimizer_dep_to_seg = torch.optim.SGD(dep_to_seg.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
-                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
-    optimizer_dep_to_seg.zero_grad()
-
-    optimizer_dep_cls = torch.optim.SGD(depth_classifier.parameters(), lr=cfg.SOLVER.BASE_LR * 10, momentum=cfg.SOLVER.MOMENTUM,
-                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
-    optimizer_dep_cls.zero_grad()
-
-    optimizer_seg_cls = torch.optim.SGD(seg_classifier.parameters(), lr=cfg.SOLVER.BASE_LR * 10, momentum=cfg.SOLVER.MOMENTUM,
-                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
-    optimizer_seg_cls.zero_grad()
+    optimizer_cls.zero_grad()
 
     output_dir = cfg.OUTPUT_DIR
 
@@ -138,7 +113,10 @@ def train(cfg, local_rank, distributed, logger):
     feature_num = 2048 if backbone_name.startswith('resnet') else 1024
 
     # Create prototypes
-    feat_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    merged_estimator = prototype_dist_estimator(feature_num=feature_num*2, cfg=cfg)
+
     if cfg.SOLVER.MULTI_LEVEL:
         out_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, cfg=cfg)
 
@@ -154,18 +132,15 @@ def train(cfg, local_rank, distributed, logger):
     logger.info(">>>>>>>>>>>>>>>> Start Training >>>>>>>>>>>>>>>>")
 
     feature_extractor.train()
-    depth_extractor.train()
-    seg_extractor.train()
-    dep_to_seg.train()
-    depth_classifier.train()
-    seg_classifier.train()
+    classifier.train()
 
     best_mIoU = 0
     best_iteration = 0
+    loss_out = 0
 
 
     # Modify data loader
-    for i, ((src_input, src_depth_label, src_seg_label, src_name), (tgt_input, tgt_depth_label,_, _)) in enumerate(zip(src_train_loader, tgt_train_loader)):
+    for i, ((src_input, src_seg_label, src_depth_label, src_name), (tgt_input, tgt_depth_label,_, _)) in enumerate(zip(src_train_loader, tgt_train_loader)):
         data_time = time.time() - end
 
         # Custom Leaning rate adjustment
@@ -173,41 +148,31 @@ def train(cfg, local_rank, distributed, logger):
                                           power=cfg.SOLVER.LR_POWER)
         for index in range(len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr
-        for index in range(len(optimizer_dep_ext.param_groups)):
-            optimizer_dep_ext.param_groups[index]['lr'] = current_lr
-        for index in range(len(optimizer_seg_ext.param_groups)):
-            optimizer_seg_ext.param_groups[index]['lr'] = current_lr
-        for index in range(len(optimizer_dep_to_seg.param_groups)):
-            optimizer_dep_to_seg.param_groups[index]['lr'] = current_lr
-        for index in range(len(optimizer_dep_cls.param_groups)):
-            optimizer_dep_cls.param_groups[index]['lr'] = current_lr * 10
-        for index in range(len(optimizer_seg_cls.param_groups)):
-            optimizer_seg_cls.param_groups[index]['lr'] = current_lr * 10
+        for index in range(len(optimizer_cls.param_groups)):
+            optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
 
         optimizer_fea.zero_grad()
-        optimizer_dep_ext.zero_grad()
-        optimizer_seg_ext.zero_grad()
-        optimizer_dep_to_seg.zero_grad()
-        optimizer_dep_cls.zero_grad()
-        optimizer_seg_cls.zero_grad()
+        optimizer_cls.zero_grad()
 
-
+        # Initialize inputs
         src_input = src_input.cuda(non_blocking=True)
-        src_depth_label = src_depth_label.cuda(non_blocking=True)
+        src_depth_label = src_depth_label.cuda(non_blocking=True).long()
         src_seg_label = src_seg_label.cuda(non_blocking=True).long()
         tgt_input = tgt_input.cuda(non_blocking=True)
-        tgt_depth_label = tgt_depth_label.cuda(non_blocking=True)
+        tgt_depth_label = tgt_depth_label.cuda(non_blocking=True).long()
         src_size = src_input.shape[-2:]
 
         # Source feature and classifier outputs
-        src_feat = feature_extractor(src_input)
+        src_feats = feature_extractor(src_input)
 
-        src_depth_feat = depth_extractor(src_feat)
-        src_seg_feat = seg_extractor(src_feat)
+        src_feat_depth = src_feats['D']
+        src_feat_seg = src_feats['S']
+        src_feat_trans = src_feats['T']
 
-        src_depth_out = depth_classifier(src_depth_feat)
-        src_seg_out = seg_classifier(src_seg_feat)
+        src_out_depth = classifier['D'](src_feat_depth)
+        src_out_trans = classifier['T'](src_feat_trans) 
+
 
         # Target feature and classifier outputs
         tgt_feat = feature_extractor(tgt_input)
@@ -249,20 +214,29 @@ def train(cfg, local_rank, distributed, logger):
         tgt_feat = tgt_feat.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, A)
 
 
-        # Update feature-level prototype xstatistics
-        feat_estimator.update(features=tgt_feat.detach(), labels=tgt_mask)
-        feat_estimator.update(features=src_feat.detach(), labels=src_mask)
+        # Update feature-level prototype statistics
+        feat_dep_estimator.update(features=src_depth_feat.detach(), labels=tgt_mask)
+        feat_dep_estimator.update(features=tgt_depth_feat.detach(), labels=tgt_mask)
+
+        feat_seg_estimator.update(features=src_seg_feat.detach(), labels=src_mask)
+        feat_seg_estimator.update(features=tgt_seg_feat.detach(), labels=src_mask)
+
+        merged_estimator.merge_update(proto1=feat_dep_estimator.Proto, 
+                                      proto2=feat_seg_estimator.Proto, 
+                                      amount=feat_dep_estimator.Amount)
 
 
         # contrastive loss on both domains
-        loss_feat = pcl_criterion(Proto=feat_estimator.Proto.detach(),
+        loss_feat = pcl_criterion(Proto=merged_estimator.Proto.detach(),
                                   feat=src_feat,
                                   labels=src_mask) \
-                    + pcl_criterion(Proto=feat_estimator.Proto.detach(),
+                    + pcl_criterion(Proto=merged_estimator.Proto.detach(),
                                   feat=tgt_feat,
                                   labels=tgt_mask)
         meters.update(loss_feat=loss_feat.item())       # Logger
 
+
+        # Output level prototypes
         if cfg.SOLVER.MULTI_LEVEL:
             src_out = src_out.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
             tgt_out = tgt_out.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
@@ -290,15 +264,23 @@ def train(cfg, local_rank, distributed, logger):
         loss.backward()
 
         optimizer_fea.step()
-        optimizer_dep_ext.step()
-        optimizer_seg_ext.step()
-        optimizer_dep_to_seg.step()
-        optimizer_dep_cls.step()
-        optimizer_seg_cls.step()
+        optimizer_cls.step()
+
 
         batch_time = time.time() - end
         end = time.time()
         meters.update(time=batch_time, data=data_time)
+
+        # Wandb Train Log
+        wandb.log({
+            "loss": loss.item(),
+            "loss_lov": loss_lov.item(),
+            "loss_sup": loss_sup.item(),
+            "loss_dep_feat": loss_feat.item(),
+            "loss_out": loss_out.item(),
+            "lr": current_lr,
+            "batch_time": batch_time,
+        })
 
         eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
         eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
@@ -323,8 +305,10 @@ def train(cfg, local_rank, distributed, logger):
                 )
             )
 
+        # Evaluate the model after iteration
         if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
-            current_mIoU, _, _ = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
+            current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
+
             feature_extractor.train()
             classifier.train()
             if save_to_disk:
@@ -344,6 +328,15 @@ def train(cfg, local_rank, distributed, logger):
                 logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
             torch.cuda.empty_cache()
 
+            # Wandb Evaluation Log
+            wandb.log({
+                "Current Best mIoU": best_mIoU,
+                "mIoU": current_mIoU,
+                "mAcc": current_mAcc,
+                "allAcc": current_allAcc,
+                "total_time": total_time_str            
+            })
+
         if iteration == cfg.SOLVER.MAX_ITER:
             break
         if iteration == cfg.SOLVER.STOP_ITER:
@@ -351,6 +344,9 @@ def train(cfg, local_rank, distributed, logger):
 
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
+
+    wandb.finish()
+    
     logger.info(
         "Total training time: {} ({:.4f} s / it)".format(
             total_time_str, total_training_time / cfg.SOLVER.STOP_ITER
@@ -358,7 +354,6 @@ def train(cfg, local_rank, distributed, logger):
     )
 
     return feature_extractor, classifier
-
 
 
 

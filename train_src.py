@@ -41,10 +41,11 @@ def strip_prefix_if_present(state_dict, prefix):
 def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
 
+    # Initialize wandb
     run = wandb.init(
         project = 'DA-ProSS',
         config = cfg,
-        name = 'UNet_CCE'
+        name = cfg.run_name
     )
 
     feature_extractor = build_feature_extractor(cfg)
@@ -207,15 +208,6 @@ def train(cfg, local_rank, distributed, logger):
 
         if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
             current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
-            
-            # Wandb Evaluation Log
-            wandb.log({
-                "Current Best mIoU": best_mIoU,
-                "mIoU": current_mIoU,
-                "mAcc": current_mAcc,
-                "allAcc": current_allAcc,
-                "total_time": total_time_str            
-            })
 
             feature_extractor.train()
             classifier.train()
@@ -234,6 +226,15 @@ def train(cfg, local_rank, distributed, logger):
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
                 logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
+
+            # Wandb Evaluation Log
+            wandb.log({
+                "Current Best mIoU": best_mIoU,
+                "mIoU": current_mIoU,
+                "mAcc": current_mAcc,
+                "allAcc": current_allAcc,
+            })
+
             torch.cuda.empty_cache()
         if iteration == cfg.SOLVER.MAX_ITER:
             break

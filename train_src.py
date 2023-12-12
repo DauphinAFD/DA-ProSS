@@ -11,6 +11,7 @@ import torch.distributed
 import torch.utils.data
 import torch.backends.cudnn
 import torch.nn.functional as F
+from torchinfo import summary
 
 from core.configs import cfg
 from core.datasets import build_dataset
@@ -20,9 +21,6 @@ from core.utils.misc import mkdir, AverageMeter, intersectionAndUnionGPU
 from core.utils.logger import setup_logger
 from core.utils.metric_logger import MetricLogger
 from core.utils.lovasz_loss import lovasz_softmax
-
-
-
 
 
 import warnings
@@ -39,43 +37,37 @@ def strip_prefix_if_present(state_dict, prefix):
         stripped_state_dict[key.replace(prefix, "")] = value
     return stripped_state_dict
 
+# class Learning_Rate_Object(object):
+#     def __init__(self,learning_rate):
+#         self.learning_rate = learning_rate
+
 
 def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
+    NUM_CLASSES = {"S": 19, "D": 1, "D_src": 1}
+    TASKNAMES = ["S", "D"]
 
     feature_extractor = build_feature_extractor(cfg)
     device = torch.device(cfg.MODEL.DEVICE)
     feature_extractor.to(device)
 
-    classifier = build_classifier(cfg)
+    classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
     classifier.to(device)
 
     batch_size = cfg.SOLVER.BATCH_SIZE  # default: 8
-    if distributed:
-        pg1 = torch.distributed.new_group(range(torch.distributed.get_world_size()))
-        batch_size = int(cfg.SOLVER.BATCH_SIZE / torch.distributed.get_world_size())
-        if not cfg.MODEL.FREEZE_BN:
-            # if don't freeze BN, then replace BN with SyncBatchNorm
-            # for self-supervised learning, use SyncBatchNorm
-            feature_extractor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(feature_extractor)
-        feature_extractor = torch.nn.parallel.DistributedDataParallel(
-            feature_extractor, device_ids=[local_rank], output_device=local_rank,
-            find_unused_parameters=True, process_group=pg1
-        )
-        pg2 = torch.distributed.new_group(range(torch.distributed.get_world_size()))
-        classifier = torch.nn.parallel.DistributedDataParallel(
-            classifier, device_ids=[local_rank], output_device=local_rank,
-            find_unused_parameters=True, process_group=pg2
-        )
-        torch.autograd.set_detect_anomaly(True)
-        torch.distributed.barrier()
+    
     
     if local_rank == 0:
         logger.info(feature_extractor)
         logger.info(classifier)
+        logger.info("Depth Feature")
+        logger.info(feature_extractor.task_prediction_heads.layers['D'])
 
-    optimizer_fea = torch.optim.SGD(feature_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
+    # learning_rate_object = Learning_Rate_Object(cfg.SOLVER.BASE_LR)
+
+    optimizer_fea = torch.optim.SGD(feature_extractor.optim_parameters(cfg.SOLVER.BASE_LR), momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    
     optimizer_fea.zero_grad()
 
     optimizer_cls = torch.optim.SGD(classifier.parameters(), lr=cfg.SOLVER.BASE_LR * 10, momentum=cfg.SOLVER.MOMENTUM,
@@ -88,23 +80,23 @@ def train(cfg, local_rank, distributed, logger):
 
     iteration = 0
 
-    if cfg.resume:
-        logger.info("Loading checkpoint from {}".format(cfg.resume))
-        checkpoint = torch.load(cfg.resume, map_location=torch.device('cpu'))
-        model_weights = checkpoint['feature_extractor'] if distributed else strip_prefix_if_present(
-            checkpoint['feature_extractor'], 'module.')
-        feature_extractor.load_state_dict(model_weights)
-        classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
-            checkpoint['classifier'], 'module.')
-        classifier.load_state_dict(classifier_weights)
-        if "optimizer_fea" in checkpoint:
-            logger.info("Loading optimizer_fea from {}".format(cfg.resume))
-            optimizer_fea.load(checkpoint['optimizer_fea'])
-        if "optimizer_cls" in checkpoint:
-            logger.info("Loading optimizer_cls from {}".format(cfg.resume))
-            optimizer_cls.load(checkpoint['optimizer_cls'])
-        if "iteration" in checkpoint:
-            iteration = checkpoint['iteration']
+    # if cfg.resume:
+    #     logger.info("Loading checkpoint from {}".format(cfg.resume))
+    #     checkpoint = torch.load(cfg.resume, map_location=torch.device('cpu'))
+    #     model_weights = checkpoint['feature_extractor'] if distributed else strip_prefix_if_present(
+    #         checkpoint['feature_extractor'], 'module.')
+    #     feature_extractor.load_state_dict(model_weights)
+    #     classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
+    #         checkpoint['classifier'], 'module.')
+    #     classifier.load_state_dict(classifier_weights)
+    #     if "optimizer_fea" in checkpoint:
+    #         logger.info("Loading optimizer_fea from {}".format(cfg.resume))
+    #         optimizer_fea.load(checkpoint['optimizer_fea'])
+    #     if "optimizer_cls" in checkpoint:
+    #         logger.info("Loading optimizer_cls from {}".format(cfg.resume))
+    #         optimizer_cls.load(checkpoint['optimizer_cls'])
+    #     if "iteration" in checkpoint:
+    #         iteration = checkpoint['iteration']
 
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
 
@@ -133,7 +125,7 @@ def train(cfg, local_rank, distributed, logger):
     best_mIoU = 0
     best_iteration = 0
 
-    for i, (src_input, src_label, _) in enumerate(train_loader):
+    for i, (src_input, src_seg_label, src_depth_label) in enumerate(train_loader):
         data_time = time.time() - end
         current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
                                           power=cfg.SOLVER.LR_POWER)
@@ -145,51 +137,55 @@ def train(cfg, local_rank, distributed, logger):
         optimizer_fea.zero_grad()
         optimizer_cls.zero_grad()
         src_input = src_input.cuda(non_blocking=True)
-        src_label = src_label.cuda(non_blocking=True).long()
+        src_seg_label = src_seg_label.cuda(non_blocking=True).long()
+        src_depth_label = src_depth_label.cuda(non_blocking=True).long()
 
-        size = src_label.shape[-2:]
+
+        size = src_seg_label.shape[-2:]
         pred = classifier(feature_extractor(src_input), size)
 
-        if cfg.SOLVER.LAMBDA_LOV > 0:
-            pred_softmax = F.softmax(pred, dim=1)
-            loss_lov = lovasz_softmax(pred_softmax, src_label, ignore=255)
-            loss = ce_criterion(pred, src_label) + cfg.SOLVER.LAMBDA_LOV * loss_lov
-            # print(pred_softmax.shape)
-            # print(src_label.shape)
-            # print(loss_lov)
-            meters.update(loss_lov=loss_lov.item())
-        else:
-            loss = ce_criterion(pred, src_label)
-        loss.backward()
+        #pred = classifier["D"](feature_extractor(src_input)["D"], size)
 
-        optimizer_fea.step()
-        optimizer_cls.step()
-        meters.update(loss_seg=loss.item())
-        iteration += 1
+    #     if cfg.SOLVER.LAMBDA_LOV > 0:
+    #         pred_softmax = F.softmax(pred, dim=1)
+    #         loss_lov = lovasz_softmax(pred_softmax, src_label, ignore=255)
+    #         loss = ce_criterion(pred, src_label) + cfg.SOLVER.LAMBDA_LOV * loss_lov
+    #         # print(pred_softmax.shape)
+    #         # print(src_label.shape)
+    #         # print(loss_lov)
+    #         meters.update(loss_lov=loss_lov.item())
+    #     else:
+    #         loss = ce_criterion(pred, src_label)
+    #     loss.backward()
 
-        batch_time = time.time() - end
-        end = time.time()
-        meters.update(time=batch_time, data=data_time)
-        eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
-        eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
-        if iteration % 20 == 0 or iteration == max_iters:
-            logger.info(
-                meters.delimiter.join(
-                    [
-                        "eta: {eta}",
-                        "iter: {iter}",
-                        "{meters}",
-                        "lr: {lr:.6f}",
-                        "max mem: {memory:.2f} GB",
-                    ]
-                ).format(
-                    eta=eta_string,
-                    iter=iteration,
-                    meters=str(meters),
-                    lr=optimizer_fea.param_groups[0]["lr"],
-                    memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0 / 1024.0,
-                )
-            )
+    #     optimizer_fea.step()
+    #     optimizer_cls.step()
+    #     meters.update(loss_seg=loss.item())
+    #     iteration += 1
+
+    #     batch_time = time.time() - end
+    #     end = time.time()
+    #     meters.update(time=batch_time, data=data_time)
+    #     eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
+    #     eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+    #     if iteration % 20 == 0 or iteration == max_iters:
+    #         logger.info(
+    #             meters.delimiter.join(
+    #                 [
+    #                     "eta: {eta}",
+    #                     "iter: {iter}",
+    #                     "{meters}",
+    #                     "lr: {lr:.6f}",
+    #                     "max mem: {memory:.2f} GB",
+    #                 ]
+    #             ).format(
+    #                 eta=eta_string,
+    #                 iter=iteration,
+    #                 meters=str(meters),
+    #                 lr=optimizer_fea.param_groups[0]["lr"],
+    #                 memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0 / 1024.0,
+    #             )
+    #         )
 
     #     if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
     #         current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)

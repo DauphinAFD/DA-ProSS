@@ -41,6 +41,7 @@ def strip_prefix_if_present(state_dict, prefix):
 
 
 def train(cfg, local_rank, distributed, logger):
+
     device = torch.device(cfg.MODEL.DEVICE)
 
     # Initialize wandb
@@ -69,7 +70,11 @@ def train(cfg, local_rank, distributed, logger):
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    optimizer_cls = torch.optim.SGD(classifier.optim_parameters(cfg.SOLVER.BASE_LR) * 10, momentum=cfg.SOLVER.MOMENTUM,
+    param_groups = [{'params': classifier['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
+                {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    
+    optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_cls.zero_grad()
 
@@ -105,6 +110,8 @@ def train(cfg, local_rank, distributed, logger):
 
     # init loss
     ce_criterion = nn.CrossEntropyLoss(ignore_index=255)
+    berhu_criterion = BerhuLoss().cuda()
+
     pcl_criterion = PrototypeContrastiveLoss(cfg)
 
 
@@ -167,38 +174,48 @@ def train(cfg, local_rank, distributed, logger):
         src_feats = feature_extractor(src_input)
 
         src_feat_depth = src_feats['D']
-        src_feat_seg = src_feats['S']
         src_feat_trans = src_feats['T']
+        src_feat_seg = src_feats['S']
+        src_feat_final_seg = src_feats['FS']
 
         src_out_depth = classifier['D'](src_feat_depth)
-        src_out_trans = classifier['T'](src_feat_trans) 
+        src_out_seg = classifier['S'](src_feat_seg)
+        src_out_final_seg = classifier['FS'](src_feat_final_seg) 
 
 
         # Target feature and classifier outputs
-        tgt_feat = feature_extractor(tgt_input)
+        tgt_feats = feature_extractor(tgt_input)
 
-        tgt_depth_feat = depth_extractor(tgt_feat)
-        tgt_seg_feat = seg_extractor(tgt_feat)
+        tgt_feat_depth = tgt_feats['D']
+        tgt_feat_trans = tgt_feats['T']
+        tgt_feat_seg = tgt_feats['S']
+        tgt_feat_final_seg = tgt_feats['FS']
 
-        tgt_depth_out = depth_classifier(tgt_depth_feat)
-        tgt_seg_out = seg_classifier(tgt_seg_feat)
+        tgt_out_depth = classifier['D'](tgt_feat_depth)
+        tgt_out_seg = classifier['S'](tgt_feat_seg)
+        tgt_out_final_seg = classifier['FS'](tgt_feat_final_seg) 
 
-        # Modify flow of blocks
 # ----------------------------------------------------------------------------
         # Supervision loss
-        src_pred = F.interpolate(src_out, size=src_size, mode='bilinear', align_corners=True)
         if cfg.SOLVER.LAMBDA_LOV > 0:
-            pred_softmax = F.softmax(src_pred, dim=1)
-            loss_lov = lovasz_softmax(pred_softmax, src_label, ignore=255)
-            loss_sup = ce_criterion(src_pred, src_label) + cfg.SOLVER.LAMBDA_LOV * loss_lov
-            meters.update(loss_lov=loss_lov.item())     # Logger
+            pred_softmax = F.softmax(src_out_seg, dim=1)
+            pred_softmax_final = F.softmax(src_out_final_seg, dim=1)
+
+            loss_lov = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
+            loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
+
+            loss = ce_criterion(src_out_seg, src_seg_label) + cfg.SOLVER.LAMBDA_LOV * (loss_lov + loss_lov_final) \
+                    + berhu_criterion(src_out_depth,src_depth_label)
+            meters.update(loss_lov=loss_lov.item())
         else:
-            loss_sup = ce_criterion(src_pred, src_label)
-        meters.update(loss_sup=loss_sup.item())     # Logger
+            loss = ce_criterion(src_out_seg, src_seg_label) + ce_criterion(src_out_final_seg, src_seg_label) \
+                    + berhu_criterion(src_out_depth,src_depth_label)
+
+
 
         # source mask: downsample the ground-truth label
         B, A, Hs, Ws = src_feat.size()
-        src_mask = F.interpolate(src_label.unsqueeze(0).float(), size=(Hs, Ws), mode='nearest').squeeze(0).long()
+        src_mask = F.interpolate(src_seg_label.unsqueeze(0).float(), size=(Hs, Ws), mode='nearest').squeeze(0).long()
         src_mask = src_mask.contiguous().view(B * Hs * Ws, )
         assert not src_mask.requires_grad
 
@@ -215,11 +232,11 @@ def train(cfg, local_rank, distributed, logger):
 
 
         # Update feature-level prototype statistics
-        feat_dep_estimator.update(features=src_depth_feat.detach(), labels=tgt_mask)
-        feat_dep_estimator.update(features=tgt_depth_feat.detach(), labels=tgt_mask)
+        feat_dep_estimator.update(features=src_feat_trans.detach(), labels=src_mask)
+        feat_dep_estimator.update(features=tgt_feat_trans.detach(), labels=tgt_mask)
 
-        feat_seg_estimator.update(features=src_seg_feat.detach(), labels=src_mask)
-        feat_seg_estimator.update(features=tgt_seg_feat.detach(), labels=src_mask)
+        feat_seg_estimator.update(features=src_feat_seg.detach(), labels=src_mask)
+        feat_seg_estimator.update(features=tgt_feat_seg.detach(), labels=tgt_mask)
 
         merged_estimator.merge_update(proto1=feat_dep_estimator.Proto, 
                                       proto2=feat_seg_estimator.Proto, 
@@ -275,7 +292,7 @@ def train(cfg, local_rank, distributed, logger):
         wandb.log({
             "loss": loss.item(),
             "loss_lov": loss_lov.item(),
-            "loss_sup": loss_sup.item(),
+            # "loss_sup": loss_sup.item(),
             "loss_dep_feat": loss_feat.item(),
             "loss_out": loss_out.item(),
             "lr": current_lr,

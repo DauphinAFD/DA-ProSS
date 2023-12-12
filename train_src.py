@@ -12,6 +12,7 @@ import torch.utils.data
 import torch.backends.cudnn
 import torch.nn.functional as F
 
+import wandb
 from core.configs import cfg
 from core.datasets import build_dataset
 from core.models import build_feature_extractor, build_classifier
@@ -20,9 +21,6 @@ from core.utils.misc import mkdir, AverageMeter, intersectionAndUnionGPU
 from core.utils.logger import setup_logger
 from core.utils.metric_logger import MetricLogger
 from core.utils.lovasz_loss import lovasz_softmax
-
-
-
 
 
 import warnings
@@ -42,6 +40,12 @@ def strip_prefix_if_present(state_dict, prefix):
 
 def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
+
+    run = wandb.init(
+        project = 'DA-ProSS',
+        config = cfg,
+        name = 'UNet_CCE'
+    )
 
     feature_extractor = build_feature_extractor(cfg)
     device = torch.device(cfg.MODEL.DEVICE)
@@ -169,6 +173,16 @@ def train(cfg, local_rank, distributed, logger):
 
         batch_time = time.time() - end
         end = time.time()
+        
+        # Wandb Train Log
+        wandb.log({
+            "loss": loss.item(),
+            "loss_lov": loss_lov.item(),
+            "lr": current_lr,
+            "batch_time": batch_time,
+        })
+        
+
         meters.update(time=batch_time, data=data_time)
         eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
         eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
@@ -191,38 +205,51 @@ def train(cfg, local_rank, distributed, logger):
                 )
             )
 
-    #     if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
-    #         current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
-    #         feature_extractor.train()
-    #         classifier.train()
-    #         if save_to_disk:
-    #             # update best model
-    #             if current_mIoU > best_mIoU:
-    #                 filename = os.path.join(output_dir, "model_best.pth")
-    #                 torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
-    #                     'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
-    #                     'optimizer_cls': optimizer_cls.state_dict()}, filename)
-    #                 best_mIoU = current_mIoU
-    #                 best_iteration = iteration
-    #             else:
-    #                 filename = os.path.join(output_dir, "model_current.pth")
-    #                 torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
-    #                     'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
-    #                     'optimizer_cls': optimizer_cls.state_dict()}, filename)
-    #             logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
-    #         torch.cuda.empty_cache()
-    #     if iteration == cfg.SOLVER.MAX_ITER:
-    #         break
-    #     if iteration == cfg.SOLVER.STOP_ITER:
-    #         break
+        if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
+            current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
+            
+            # Wandb Evaluation Log
+            wandb.log({
+                "Current Best mIoU": best_mIoU,
+                "mIoU": current_mIoU,
+                "mAcc": current_mAcc,
+                "allAcc": current_allAcc,
+                "total_time": total_time_str            
+            })
 
-    # total_training_time = time.time() - start_training_time
-    # total_time_str = str(datetime.timedelta(seconds=total_training_time))
-    # logger.info(
-    #     "Total training time: {} ({:.4f} s / it)".format(
-    #         total_time_str, total_training_time / cfg.SOLVER.STOP_ITER
-    #     )
-    # )
+            feature_extractor.train()
+            classifier.train()
+            if save_to_disk:
+                # update best model
+                if current_mIoU > best_mIoU:
+                    filename = os.path.join(output_dir, "model_best.pth")
+                    torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
+                        'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
+                        'optimizer_cls': optimizer_cls.state_dict()}, filename)
+                    best_mIoU = current_mIoU
+                    best_iteration = iteration
+                else:
+                    filename = os.path.join(output_dir, "model_current.pth")
+                    torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
+                        'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
+                        'optimizer_cls': optimizer_cls.state_dict()}, filename)
+                logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
+            torch.cuda.empty_cache()
+        if iteration == cfg.SOLVER.MAX_ITER:
+            break
+        if iteration == cfg.SOLVER.STOP_ITER:
+            break
+        
+    
+    total_training_time = time.time() - start_training_time
+    total_time_str = str(datetime.timedelta(seconds=total_training_time))
+    
+    wandb.finish()
+    logger.info(
+        "Total training time: {} ({:.4f} s / it)".format(
+            total_time_str, total_training_time / cfg.SOLVER.STOP_ITER
+        )
+    )
 
 
 def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger):

@@ -1,0 +1,34 @@
+0002668.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000120_000019_leftImg8bit.png
+0008388.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000121_000019_leftImg8bit.png
+t.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000122_000019_leftImg8bit.png
+0003482.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000123_000019_leftImg8bit.png
+t.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000124_000019_leftImg8bit.png
+0005643.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000125_000019_leftImg8bit.png
+0007247.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000126_000019_leftImg8bit.png
+0006539.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000127_000019_leftImg8bit.png
+t.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000128_000019_leftImg8bit.png
+0007285.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000129_000019_leftImg8bit.png
+0002928.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000130_000019_leftImg8bit.png
+0005010.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000131_000019_leftImg8bit.png
+t.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000132_000019_leftImg8bit.png
+0005258.png      datasets/cityscapes/leftImg8bit/train/aachen/aachen_000133_000019_leftImg8bit.png
+
+
+0006547.png    datasets/cityscapes/leftImg8bit/train/bremen/bremen_000035_000019_leftImg8bit.png
+0000813.png    datasets/cityscapes/leftImg8bit/train/bremen/bremen_000036_000019_leftImg8bit.png
+0001655.png    datasets/cityscapes/leftImg8bit/train/bremen/bremen_000037_000019_leftImg8bit.png
+0003738.png    datasets/cityscapes/leftImg8bit/train/bremen/bremen_000038_000019_leftImg8bit.png
+0001458.png    datasets/cityscapes/leftImg8bit/train/bremen/bremen_000039_000019_leftImg8bit.png
+0000813.png    datasets/cityscapes/leftImg8bit/train/bremen/bremen_000040_000019_leftImg8bit.png
+0000484.png    datasets/cityscapes/leftImg8bit/train/bremen/bremen_000041_000019_leftImg8bit.png
+0006372.png    datasets/cityscapes/leftImg8bit/train/bremen/bremen_000042_000019_leftImg8bit.png
+
+[11/09 00:06:12 ProCA]:  Training Source Image ['datasets/synthia/RAND_CITYSCAPES/RGB/0006547.png'] Target Image ['datasets/cityscapes/leftImg8bit/train/bremen/bremen_000035_000019_leftImg8bit.png']
+[11/09 00:06:13 ProCA]:  Training Source Image ['datasets/synthia/RAND_CITYSCAPES/RGB/0000813.png'] Target Image ['datasets/cityscapes/leftImg8bit/train/bremen/bremen_000036_000019_leftImg8bit.png']
+[11/09 00:06:13 ProCA]:  Training Source Image ['datasets/synthia/RAND_CITYSCAPES/RGB/0001655.png'] Target Image ['datasets/cityscapes/leftImg8bit/train/bremen/bremen_000037_000019_leftImg8bit.png']
+[11/09 00:06:13 ProCA]:  Training Source Image ['datasets/synthia/RAND_CITYSCAPES/RGB/0003738.png'] Target Image ['datasets/cityscapes/leftImg8bit/train/bremen/bremen_000038_000019_leftImg8bit.png']
+[11/09 00:06:14 ProCA]:  Training Source Image ['datasets/synthia/RAND_CITYSCAPES/RGB/0001458.png'] Target Image ['datasets/cityscapes/leftImg8bit/train/bremen/bremen_000039_000019_leftImg8bit.png']
+[11/09 00:06:14 ProCA]:  Training Source Image ['datasets/synthia/RAND_CITYSCAPES/RGB/0000813.png'] Target Image ['datasets/cityscapes/leftImg8bit/train/bremen/bremen_000040_000019_leftImg8bit.png']
+[11/09 00:06:14 ProCA]:  Training Source Image ['datasets/synthia/RAND_CITYSCAPES/RGB/0000484.png'] Target Image ['datasets/cityscapes/leftImg8bit/train/bremen/bremen_000041_000019_leftImg8bit.png']
+[11/09 00:06:15 ProCA]:  Training Source Image ['datasets/synthia/RAND_CITYSCAPES/RGB/0006372.png'] Target Image ['datasets/cityscapes/leftImg8bit/train/bremen/bremen_000042_000019_leftImg8bit.png']
+

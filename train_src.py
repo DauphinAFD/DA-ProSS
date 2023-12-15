@@ -41,7 +41,7 @@ def strip_prefix_if_present(state_dict, prefix):
 
 def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
-    NUM_CLASSES = {"S": 16, "D": 1, "D_src": 1}
+    NUM_CLASSES = {"S": 16, "D": 1}
     TASKNAMES = ["S", "D"]
 
     feature_extractor = build_feature_extractor(cfg)
@@ -138,17 +138,15 @@ def train(cfg, local_rank, distributed, logger):
 
         current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
                                           power=cfg.SOLVER.LR_POWER)
-        for index in range(len(optimizer_fea.param_groups)):
-            optimizer_fea.param_groups[index]['lr'] = current_lr
+        
+        optimizer_fea.param_groups[0]['lr'] = current_lr
+        for index in range(1, len(optimizer_fea.param_groups)):
+            optimizer_fea.param_groups[index]['lr'] = current_lr * 10
         for index in range(len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
         optimizer_fea.zero_grad()
         optimizer_cls.zero_grad()
-
-        
-
-
         src_input = src_input.cuda(non_blocking=True)
         src_seg_label = src_seg_label.cuda(non_blocking=True).long()
         src_depth_label = src_depth_label.cuda(non_blocking=True).long()

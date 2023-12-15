@@ -168,12 +168,12 @@ def train(cfg, local_rank, distributed, logger):
             loss_lov = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
             loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
 
-            loss = ce_criterion(pred_seg, src_seg_label) + cfg.SOLVER.LAMBDA_LOV * (loss_lov + loss_lov_final) \
-                    + berhu_criterion(pred_depth,src_depth_label)
+            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_final_seg, src_seg_label) + \
+                cfg.SOLVER.LAMBDA_LOV * (loss_lov + loss_lov_final) + 0.01 * berhu_criterion(pred_depth,src_depth_label)
             meters.update(loss_lov=loss_lov.item())
         else:
-            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_final_seg, src_seg_label) \
-                    + berhu_criterion(pred_depth,src_depth_label)
+            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_final_seg, src_seg_label) + \
+                    0.01 * berhu_criterion(pred_depth,src_depth_label)
 
         loss.backward()
 

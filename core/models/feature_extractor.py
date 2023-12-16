@@ -196,7 +196,7 @@ class TaskPredictionModule(nn.Module):
                 downsample = None
             bottleneck1 = BottleneckPad(input_channels, intermediate_channels//4, downsample=downsample)
             bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
-            conv_out_ = nn.Conv2d(intermediate_channels, NUM_OUTPUT[task], 1)
+            # conv_out_ = nn.Conv2d(intermediate_channels, NUM_OUTPUT[task], 1)
             layers[task] = nn.Sequential(bottleneck1, bottleneck2)
             # conv_out[task] = conv_out_
         

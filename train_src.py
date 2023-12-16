@@ -50,9 +50,9 @@ def train(cfg, local_rank, distributed, logger):
     device = torch.device(cfg.MODEL.DEVICE)
     feature_extractor.to(device)
     # classifier.to(device)
-    classifier['D'].to(device)
     classifier['S'].to(device)
-    classifier['FS'].to(device)
+    # classifier['D'].to(device)
+    # classifier['FS'].to(device)
 
     batch_size = cfg.SOLVER.BATCH_SIZE  # default: 8
     
@@ -68,11 +68,12 @@ def train(cfg, local_rank, distributed, logger):
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups = [{'params': classifier['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
-    
-    optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
+    # param_groups = [{'params': classifier['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
+    #             {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+    #             {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    # optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
+    #                                 weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    optimizer_cls = torch.optim.SGD(classifier['S'].parameters(), lr = 10*cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_cls.zero_grad()
 
@@ -123,9 +124,9 @@ def train(cfg, local_rank, distributed, logger):
     meters = MetricLogger(delimiter="  ")
 
     feature_extractor.train()
-    classifier['D'].train()
     classifier['S'].train()
-    classifier['FS'].train()
+    # classifier['D'].train()
+    # classifier['FS'].train()
 
     start_training_time = time.time()
     end = time.time()
@@ -156,22 +157,20 @@ def train(cfg, local_rank, distributed, logger):
         src_feats = feature_extractor(src_input)
 
         pred_seg = classifier['S'](src_feats['S'], size)
-        pred_depth = classifier['D'](src_feats['D'], size)
-        pred_final_seg = classifier['FS'](src_feats['FS'], size)
+        # pred_depth = classifier['D'](src_feats['D'], size)
+        # pred_final_seg = classifier['FS'](src_feats['FS'], size)
 
         if cfg.SOLVER.LAMBDA_LOV > 0:
             pred_softmax = F.softmax(pred_seg, dim=1)
-            pred_softmax_final = F.softmax(pred_final_seg, dim=1)
+            # pred_softmax_final = F.softmax(pred_final_seg, dim=1)
 
             loss_lov = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
-            loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
+            # loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
 
-            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_final_seg, src_seg_label) + \
-                cfg.SOLVER.LAMBDA_LOV * (loss_lov + loss_lov_final) + 0.01 * berhu_criterion(pred_depth,src_depth_label)
+            loss = ce_criterion(pred_seg, src_seg_label) + cfg.SOLVER.LAMBDA_LOV * (loss_lov ) 
             meters.update(loss_lov=loss_lov.item())
         else:
-            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_final_seg, src_seg_label) + \
-                    0.01 * berhu_criterion(pred_depth,src_depth_label)
+            loss = ce_criterion(pred_seg, src_seg_label) 
 
         loss.backward()
 
@@ -207,9 +206,9 @@ def train(cfg, local_rank, distributed, logger):
         if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
             current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
             feature_extractor.train()
-            classifier['D'].train()
             classifier['S'].train()
-            classifier['FS'].train()
+            # classifier['D'].train()
+            # classifier['FS'].train()
 
             if save_to_disk:
                 # update best model
@@ -269,9 +268,9 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
                                               pin_memory=True, sampler=test_sampler)
     
     feature_extractor.eval()
-    classifier['D'].eval()
     classifier['S'].eval()
-    classifier['FS'].eval()
+    # classifier['D'].eval()
+    # classifier['FS'].eval()
 
     end = time.time()
     with torch.no_grad():

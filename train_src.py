@@ -214,7 +214,7 @@ def train(cfg, local_rank, distributed, logger):
             feature_extractor.train()
             classifier['S'].train()
             classifier['D'].train()
-            # classifier['FS'].train()
+            classifier['T'].train()
 
             if save_to_disk:
                 # update best model
@@ -276,7 +276,7 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     feature_extractor.eval()
     classifier['S'].eval()
     classifier['D'].eval()
-    # classifier['FS'].eval()
+    classifier['T'].eval()
 
     end = time.time()
     with torch.no_grad():

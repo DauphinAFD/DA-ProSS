@@ -1,17 +1,17 @@
 MODEL:
   NAME: "deeplab_resnet101"
   WEIGHTS: 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth'
-  FREEZE_BN: False
   NUM_CLASSES: 16
+  FREEZE_BN: False
 DATASETS:
   SOURCE_TRAIN: "synthia_train"
   TEST: "cityscapes_val"
 INPUT:
-  SOURCE_INPUT_SIZE_TRAIN: (320, 180)
-  INPUT_SIZE_TEST: (320, 180)
+  SOURCE_INPUT_SIZE_TRAIN: (1024, 512)
+  INPUT_SIZE_TEST: (1024, 512)
 SOLVER:
   BASE_LR: 5e-4
-  MAX_ITER: 31250
-  STOP_ITER: 20000
+  MAX_ITER: 125000
+  STOP_ITER: 80000
   BATCH_SIZE: 2
   BATCH_SIZE_VAL: 1

@@ -11,7 +11,7 @@ import torch.distributed
 import torch.utils.data
 import torch.backends.cudnn
 import torch.nn.functional as F
-from torchinfo import summary
+# from torchinfo import summary
 
 from core.configs import cfg
 from core.datasets import build_dataset
@@ -281,7 +281,7 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
 
             size = y.shape[-2:]
             out = feature_extractor(x)
-            output = classifier['FS'](out['FS'])
+            output = classifier['S'](out['S']) # Changed train_src
 
             output = F.interpolate(output, size=size, mode='bilinear', align_corners=True)
             output = output.max(1)[1]

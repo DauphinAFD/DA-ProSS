@@ -46,7 +46,7 @@ class BerhuLoss(nn.Module):
     def __init__(self, ignore_index = 1):
         super(BerhuLoss, self).__init__()
         self.ignore_index = ignore_index
-        self.l1 = torch.nn.L1Loss(reduction = 'none')
+        self.l1 = torch.nn.L1Loss(reduction = 'mean')
 
     def forward(self, prediction, ground_truth, imagemask=None):
         if imagemask is not None:

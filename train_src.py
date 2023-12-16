@@ -52,7 +52,7 @@ def train(cfg, local_rank, distributed, logger):
     # classifier.to(device)
     classifier['S'].to(device)
     classifier['D'].to(device)
-    # classifier['FS'].to(device)
+    classifier['T'].to(device)
 
     batch_size = cfg.SOLVER.BATCH_SIZE  # default: 8
     
@@ -69,11 +69,11 @@ def train(cfg, local_rank, distributed, logger):
     optimizer_fea.zero_grad()
 
     param_groups = [{'params': classifier['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+                {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
-    # ,
-    #             {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}
+    
     # optimizer_cls = torch.optim.SGD(classifier['S'].parameters(), lr = 10*cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
     #                                 weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_cls.zero_grad()
@@ -127,7 +127,7 @@ def train(cfg, local_rank, distributed, logger):
     feature_extractor.train()
     classifier['S'].train()
     classifier['D'].train()
-    # classifier['FS'].train()
+    classifier['T'].train()
 
     start_training_time = time.time()
     end = time.time()
@@ -159,19 +159,24 @@ def train(cfg, local_rank, distributed, logger):
 
         pred_seg = classifier['S'](src_feats['S'], size)
         pred_depth = classifier['D'](src_feats['D'], size)
-        # pred_final_seg = classifier['FS'](src_feats['FS'], size)
+        pred_trans = classifier['T'](src_feats['T'], size)
 
         if cfg.SOLVER.LAMBDA_LOV > 0:
             pred_softmax = F.softmax(pred_seg, dim=1)
+            pred_softmax_trans = F.softmax(pred_trans, dim=1)
             # pred_softmax_final = F.softmax(pred_final_seg, dim=1)
 
             loss_lov = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
+            loss_lov_trans = lovasz_softmax(pred_softmax_trans, src_seg_label, ignore=255)
             # loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
 
-            loss = ce_criterion(pred_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + (0.01 * berhu_criterion(pred_depth, src_depth_label)) 
+            loss = ce_criterion(pred_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
+                ce_criterion(pred_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + (0.01 * berhu_criterion(pred_depth, src_depth_label)) 
+            
             meters.update(loss_lov=loss_lov.item())
+            meters.update(loss_lov_trans=loss_lov_trans.item())
         else:
-            loss = ce_criterion(pred_seg, src_seg_label) + (0.01 * berhu_criterion(pred_depth, src_depth_label))
+            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_trans, src_seg_label) +(0.01 * berhu_criterion(pred_depth, src_depth_label))
 
         loss.backward()
 

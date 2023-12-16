@@ -53,6 +53,7 @@ def train(cfg, local_rank, distributed, logger):
     classifier['S'].to(device)
     classifier['D'].to(device)
     classifier['T'].to(device)
+    classifier['FS'].to(device)
 
     batch_size = cfg.SOLVER.BATCH_SIZE  # default: 8
     
@@ -68,9 +69,11 @@ def train(cfg, local_rank, distributed, logger):
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups = [{'params': classifier['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
+    param_groups = [{'params': classifier['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR},
                 {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+                {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    
     optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     
@@ -118,7 +121,7 @@ def train(cfg, local_rank, distributed, logger):
                                                drop_last=True)
 
     ce_criterion = torch.nn.CrossEntropyLoss(ignore_index=255)
-    berhu_criterion = BerhuLoss().cuda()
+    berhu_criterion = BerhuLoss(ignore_index=255).cuda()
 
     max_iters = cfg.SOLVER.MAX_ITER
     logger.info("Start training")
@@ -128,6 +131,7 @@ def train(cfg, local_rank, distributed, logger):
     classifier['S'].train()
     classifier['D'].train()
     classifier['T'].train()
+    classifier['FS'].train()
 
     start_training_time = time.time()
     end = time.time()
@@ -144,6 +148,8 @@ def train(cfg, local_rank, distributed, logger):
         optimizer_fea.param_groups[0]['lr'] = current_lr
         for index in range(1, len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr * 10
+        
+        optimizer_cls.param_groups[index]['lr'] = current_lr * 5
         for index in range(len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
@@ -160,23 +166,26 @@ def train(cfg, local_rank, distributed, logger):
         pred_seg = classifier['S'](src_feats['S'], size)
         pred_depth = classifier['D'](src_feats['D'], size)
         pred_trans = classifier['T'](src_feats['T'], size)
+        pred_seg_final = classifier['FS'](src_feats['FS'], size)
 
         if cfg.SOLVER.LAMBDA_LOV > 0:
             pred_softmax = F.softmax(pred_seg, dim=1)
             pred_softmax_trans = F.softmax(pred_trans, dim=1)
-            # pred_softmax_final = F.softmax(pred_final_seg, dim=1)
+            pred_softmax_final = F.softmax(pred_seg_final, dim=1)
 
             loss_lov = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
             loss_lov_trans = lovasz_softmax(pred_softmax_trans, src_seg_label, ignore=255)
-            # loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
+            loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
 
             loss = ce_criterion(pred_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
-                ce_criterion(pred_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + (0.01 * berhu_criterion(pred_depth, src_depth_label)) 
+                ce_criterion(pred_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
+                    ce_criterion(pred_seg_final, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + (0.01 * berhu_criterion(pred_depth, src_depth_label)) 
             
             meters.update(loss_lov=loss_lov.item())
             meters.update(loss_lov_trans=loss_lov_trans.item())
+            meters.update(loss_lov_final=loss_lov_final.item())
         else:
-            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_trans, src_seg_label) +(0.01 * berhu_criterion(pred_depth, src_depth_label))
+            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_trans, src_seg_label) + ce_criterion(pred_seg_final, src_seg_label) + (0.01 * berhu_criterion(pred_depth, src_depth_label))
 
         loss.backward()
 
@@ -215,6 +224,7 @@ def train(cfg, local_rank, distributed, logger):
             classifier['S'].train()
             classifier['D'].train()
             classifier['T'].train()
+            classifier['FS'].train()
 
             if save_to_disk:
                 # update best model
@@ -277,6 +287,7 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     classifier['S'].eval()
     classifier['D'].eval()
     classifier['T'].eval()
+    classifier['FS'].eval()
 
     end = time.time()
     with torch.no_grad():

@@ -286,7 +286,7 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
 
             size = y.shape[-2:]
             out = feature_extractor(x)
-            output = classifier['S'](out['S']) # Changed train_src
+            output = classifier['T'](out['T']) # Changed train_src
 
             output = F.interpolate(output, size=size, mode='bilinear', align_corners=True)
             output = output.max(1)[1]

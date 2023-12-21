@@ -5,6 +5,7 @@ import logging
 import time
 import numpy as np
 from collections import OrderedDict
+import wandb
 
 import torch
 import torch.distributed
@@ -43,6 +44,12 @@ def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
     NUM_CLASSES = {"S": 16, "D": 1}
     TASKNAMES = ["S", "D"]
+
+    run = wandb.init(
+        project = 'DA-ProSS',
+        config = cfg,
+        name = 'Run1'
+    )
 
     feature_extractor = build_feature_extractor(cfg)
     classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
@@ -196,6 +203,15 @@ def train(cfg, local_rank, distributed, logger):
 
         batch_time = time.time() - end
         end = time.time()
+
+        # Wandb Train Log
+        wandb.log({
+            "loss": loss.item(),
+            "loss_lov": loss_lov.item(),
+            "lr": current_lr,
+            "batch_time": batch_time,
+        })
+
         meters.update(time=batch_time, data=data_time)
         eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
         eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
@@ -220,6 +236,7 @@ def train(cfg, local_rank, distributed, logger):
 
         if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
             current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
+
             feature_extractor.train()
             classifier['S'].train()
             classifier['D'].train()
@@ -241,6 +258,15 @@ def train(cfg, local_rank, distributed, logger):
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
                 logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
+
+            # Wandb Evaluation Log
+            wandb.log({
+                "Current Best mIoU": best_mIoU,
+                "mIoU": current_mIoU,
+                "mAcc": current_mAcc,
+                "allAcc": current_allAcc,
+            })
+
             torch.cuda.empty_cache()
         if iteration == cfg.SOLVER.MAX_ITER:
             break
@@ -249,6 +275,9 @@ def train(cfg, local_rank, distributed, logger):
 
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
+
+    wandb.finish()
+
     logger.info(
         "Total training time: {} ({:.4f} s / it)".format(
             total_time_str, total_training_time / cfg.SOLVER.STOP_ITER

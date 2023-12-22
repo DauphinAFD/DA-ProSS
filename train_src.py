@@ -164,29 +164,29 @@ def train(cfg, local_rank, distributed, logger):
 
         src_feats = feature_extractor(src_input)
 
-        pred_seg = classifier['S'](src_feats['S'], size)
-        pred_depth = classifier['D'](src_feats['D'], size)
-        pred_trans = classifier['T'](src_feats['T'], size)
-        pred_seg_final = classifier['FS'](src_feats['FS'], size)
+        src_out_seg = classifier['S'](src_feats['S'], size)
+        src_out_depth = classifier['D'](src_feats['D'], size)
+        src_out_trans = classifier['T'](src_feats['T'], size)
+        src_out_final_seg = classifier['FS'](src_feats['FS'], size)
 
         if cfg.SOLVER.LAMBDA_LOV > 0:
-            pred_softmax = F.softmax(pred_seg, dim=1)
-            pred_softmax_trans = F.softmax(pred_trans, dim=1)
-            pred_softmax_final = F.softmax(pred_seg_final, dim=1)
+            pred_softmax = F.softmax(src_out_seg, dim=1)
+            pred_softmax_trans = F.softmax(src_out_trans, dim=1)
+            pred_softmax_final = F.softmax(src_out_final_seg, dim=1)
 
             loss_lov = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
             loss_lov_trans = lovasz_softmax(pred_softmax_trans, src_seg_label, ignore=255)
             loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
 
-            loss = ce_criterion(pred_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
-                ce_criterion(pred_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
-                    ce_criterion(pred_seg_final, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(pred_depth, src_depth_label)) 
+            loss = ce_criterion(src_out_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
+                ce_criterion(src_out_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
+                    ce_criterion(src_out_final_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(src_out_depth, src_depth_label)) 
             
             meters.update(loss_lov=loss_lov.item())
             meters.update(loss_lov_trans=loss_lov_trans.item())
             meters.update(loss_lov_final=loss_lov_final.item())
         else:
-            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_trans, src_seg_label) + ce_criterion(pred_seg_final, src_seg_label) + (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(pred_depth, src_depth_label))
+            loss = ce_criterion(src_out_seg, src_seg_label) + ce_criterion(src_out_trans, src_seg_label) + ce_criterion(src_out_final_seg, src_seg_label) + (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(src_out_depth, src_depth_label))
 
         loss.backward()
 

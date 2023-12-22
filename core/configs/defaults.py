@@ -83,6 +83,8 @@ _C.SOLVER.BATCH_SIZE_VAL = 1
 _C.SOLVER.MULTI_LEVEL = True
 # lovasz_softmax loss
 _C.SOLVER.LAMBDA_LOV = 0.0
+# lovasz_softmax loss
+_C.SOLVER.LAMBDA_DEPTH = 0.001
 # constant threshold for target mask
 _C.SOLVER.DELTA = 0.9
 # weight of feature level contrastive loss

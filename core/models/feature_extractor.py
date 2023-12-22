@@ -135,6 +135,7 @@ class resnet_feature_extractor(nn.Module):
         # Task-specific heads for initial prediction
         self.task_prediction_heads = TaskPredictionModule(self.auxilary_tasks, self.channels)
         self.transfer = Transfer(self.channels )
+        self.final_prediction = FinalPredictionModule(self.channels)
         
     def forward(self, x):
         out = self.backbone(x)['out']
@@ -144,13 +145,15 @@ class resnet_feature_extractor(nn.Module):
         output['T'] = out1
         for task in self.auxilary_tasks:
             output[task] = out[task]
-        output['FS'] = torch.cat((out1,out['S']), dim=1)
+        #
+        output['FS'] =  self.final_prediction(output)
         return output
 
     def optim_parameters(self, learning_rate):
         return [{'params': self.backbone.parameters(), 'lr': learning_rate},
                 {'params': self.task_prediction_heads.parameters(), 'lr': 10*learning_rate},
-                {'params': self.transfer.parameters(), 'lr': 10*learning_rate}]
+                {'params': self.transfer.parameters(), 'lr': 10*learning_rate},
+                {'params': self.final_prediction.parameters(), 'lr': 10*learning_rate}]
  
 class resnet_feature_extractor_v2(nn.Module):
     _batchnorm = (nn.BatchNorm2d, nn.SyncBatchNorm, nn.GroupNorm)
@@ -196,7 +199,7 @@ class TaskPredictionModule(nn.Module):
                 downsample = None
             bottleneck1 = BottleneckPad(input_channels, intermediate_channels//4, downsample=downsample)
             bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
-            conv_out_ = nn.Conv2d(intermediate_channels, NUM_OUTPUT[task], 1)
+            # conv_out_ = nn.Conv2d(intermediate_channels, NUM_OUTPUT[task], 1)
             layers[task] = nn.Sequential(bottleneck1, bottleneck2)
             # conv_out[task] = conv_out_
         
@@ -233,17 +236,37 @@ class Transfer(nn.Module):
         out = self.transfer(x)
         # out = self.conv_out(out)
         return out
+
+
+class SABlock(nn.Module):
+    """ Spatial self-attention block """
+    def __init__(self, in_channels, out_channels):
+        super(SABlock, self).__init__()
+        self.attention = nn.Sequential(nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+                                        nn.ReLU(inplace=True))
+        self.conv = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
+
+    def forward(self, x):
+        attention_mask = self.attention(x)
+        features = self.conv(x)
+        return torch.mul(features, attention_mask)
+
+class FinalPredictionModule(nn.Module):
+    """
+        Perform Multi-Task Distillation
+        We apply an attention mask to features from other tasks and
+        add the result as a residual.
+    """
+    def __init__(self, channels):
+        super(FinalPredictionModule, self).__init__()
+
+        self.self_attention = SABlock(channels, channels)
+
+
+    def forward(self, x):
+        adapters = self.self_attention(x['T'])
+        # out = x['S'] + torch.sum(torch.stack([v for v in adapters]), dim=0)
+        out = x['S'] + adapters
+        # out = x['S'] + torch.stack([v for v in adapters])
+        return out
     
-# class AdaptiveNet(nn.Module):
-#     def __init__(self, encoder, transfer):
-#         super(AdaptiveNet, self).__init__()
-#         self.encoder = encoder
-#         self.transfer = transfer
-
-#     def forward(self, x):
-#         out = self.encoder(x)
-#         out = self.transfer(out)
-#         return out
-
-
-

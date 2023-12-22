@@ -34,7 +34,8 @@ def build_classifier(cfg, TASKNAMES, NUM_CLASSES):
         heads = {}
         for task in TASKNAMES:
             heads[task] = ASPP_Classifier_V2(2048, [6, 12, 18, 24], [6, 12, 18, 24], NUM_CLASSES[task])
-        heads['FS'] = ASPP_Classifier_V2(4096, [6, 12, 18, 24], [6, 12, 18, 24], NUM_CLASSES['S']) 
+        heads['T'] = ASPP_Classifier_V2(2048, [6, 12, 18, 24], [6, 12, 18, 24], NUM_CLASSES['S']) 
+        heads['FS'] = ASPP_Classifier_V2(2048, [6, 12, 18, 24], [6, 12, 18, 24], NUM_CLASSES['S']) 
         classifier = nn.ModuleDict(heads)
     else:
         raise NotImplementedError

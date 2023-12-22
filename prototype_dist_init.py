@@ -36,15 +36,26 @@ def strip_prefix_if_present(state_dict, prefix):
 def prototype_dist_init(cfg, logger):
     _, backbone_name = cfg.MODEL.NAME.split('_')
     feature_num = 2048 if backbone_name.startswith('resnet') else 1024
-    feat_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+
+    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    merged_estimator = prototype_dist_estimator(feature_num=feature_num*2, cfg=cfg)
+
     out_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, cfg=cfg)
 
-    feature_extractor = build_feature_extractor(cfg)
     device = torch.device(cfg.MODEL.DEVICE)
+
+    NUM_CLASSES = {"S": 16, "D": 1}
+    TASKNAMES = ["S", "D"]
+    
+    feature_extractor = build_feature_extractor(cfg)
     feature_extractor.to(device)
 
-    classifier = build_classifier(cfg)
-    classifier.to(device)
+    classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
+    classifier['S'].to(device)
+    classifier['D'].to(device)
+    classifier['T'].to(device)
+    classifier['FS'].to(device)
 
     torch.cuda.empty_cache()
 
@@ -52,8 +63,10 @@ def prototype_dist_init(cfg, logger):
     if cfg.resume:
         logger.info("Loading checkpoint from {}".format(cfg.resume))
         checkpoint = torch.load(cfg.resume, map_location=torch.device('cpu'))
+
         feature_extractor_weights = strip_prefix_if_present(checkpoint['feature_extractor'], 'module.')
         feature_extractor.load_state_dict(feature_extractor_weights)
+        
         classifier_weights = strip_prefix_if_present(checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
 
@@ -73,29 +86,41 @@ def prototype_dist_init(cfg, logger):
     meters = MetricLogger(delimiter="  ")
     logger.info(">>>>>>>>>>>>>>>> Initialize prototype >>>>>>>>>>>>>>>>")
     logger.info(max_iters)
+
     with torch.no_grad():
-        for i, (src_input, src_label, _) in enumerate(src_train_loader):
+        for i, (src_input, src_seg_label, src_dep_label, _) in enumerate(src_train_loader):
             data_time = time.time() - end
 
             src_input = src_input.cuda(non_blocking=True)
-            src_label = src_label.cuda(non_blocking=True).long()
+            src_seg_label = src_seg_label.cuda(non_blocking=True).long()
+            src_dep_label = src_dep_label.cuda(non_blocking=True).long()
 
-            src_feat = feature_extractor(src_input)
-            src_out = classifier(src_feat)
-            B, N, Hs, Ws = src_feat.size()
-            _, C, _, _ = src_out.size()
+            size = src_seg_label.shape[-2:]
+
+            src_feats = feature_extractor(src_input)
+            src_feat_trans = src_feats['T']
+            src_feat_seg = src_feats['S']
+            src_feat_final_seg = src_feats['FS']
+
+            src_out_final_seg = classifier['FS'](src_feat_final_seg, size)
+
+            B, N, Hs, Ws = src_feat_seg.size()
+            _, C, _, _ = src_out_final_seg.size()
 
             # source mask: downsample the ground-truth label
-            src_mask = F.interpolate(src_label.unsqueeze(0).float(), size=(Hs, Ws), mode='nearest').squeeze(0).long()
+            src_mask = F.interpolate(src_seg_label.unsqueeze(0).float(), size=(Hs, Ws), mode='nearest').squeeze(0).long()
             src_mask = src_mask.contiguous().view(B * Hs * Ws, )
 
             # feature level
             src_feat = src_feat.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
-            feat_estimator.update(features=src_feat.detach().clone(), labels=src_mask)
-
+            feat_seg_estimator.update(features=src_feat_seg.detach().clone(), labels=src_mask)
+            feat_dep_estimator.update(features=src_feat_trans.detach().clone(), labels=src_mask)
+            merged_estimator.merge_update(proto1=feat_dep_estimator.Proto, 
+                                          proto2=feat_seg_estimator.Proto, 
+                                          amount=feat_dep_estimator.Amount)
             # output level
-            src_out = src_out.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, C)
-            out_estimator.update(features=src_out.detach().clone(), labels=src_mask)
+            src_out_final_seg = src_out_final_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, C)
+            out_estimator.update(features=src_out_final_seg.detach().clone(), labels=src_mask)
 
             batch_time = time.time() - end
             end = time.time()
@@ -123,7 +148,9 @@ def prototype_dist_init(cfg, logger):
                 )
 
             if iteration == max_iters:
-                feat_estimator.save(name='prototype_feat_dist.pth')
+                feat_seg_estimator.save(name='prototype_seg_dist.pth')
+                feat_dep_estimator.save(name='prototype_dep_dist.pth')
+                merged_estimator.save(name='prototype_merged_dist.pth')
                 out_estimator.save(name='prototype_out_dist.pth')
 
     total_time = time.time() - start_time

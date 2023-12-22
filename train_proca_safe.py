@@ -161,7 +161,7 @@ def train(cfg, local_rank, distributed, logger):
                                           power=cfg.SOLVER.LR_POWER)
         
         for index in range(len(optimizer_fea.param_groups)):
-            optimizer_fea.param_groups[index]['lr'] = current_lr
+            optimizer_fea.param_groups[index]['lr'] = current_lr * 10
 
         for index in range(len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
@@ -221,7 +221,8 @@ def train(cfg, local_rank, distributed, logger):
             loss_sup = ce_criterion(src_out_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
                     ce_criterion(src_out_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
                     ce_criterion(src_out_final_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + \
-                    (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(src_out_depth, src_depth_label))
+                    (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(src_out_depth, src_depth_label)) + \
+                    (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(tgt_out_depth, tgt_depth_label))
              
             meters.update(loss_lov=loss_lov.item())
             meters.update(loss_lov_trans=loss_lov_trans.item())
@@ -239,7 +240,7 @@ def train(cfg, local_rank, distributed, logger):
 
         # target mask: constant threshold -- cfg.SOLVER.THRESHOLD
         _, _, Ht, Wt = tgt_feat.size()
-        tgt_out_maxvalue, tgt_mask = torch.max(tgt_out, dim=1)
+        tgt_out_maxvalue, tgt_mask = torch.max(tgt_out_final_seg, dim=1)
         for i in range(cfg.MODEL.NUM_CLASSES):
             tgt_mask[(tgt_out_maxvalue < cfg.SOLVER.DELTA) * (tgt_mask == i)] = 255
         tgt_mask = tgt_mask.contiguous().view(B * Ht * Wt, )

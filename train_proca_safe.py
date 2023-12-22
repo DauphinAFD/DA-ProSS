@@ -24,7 +24,7 @@ from core.utils.logger import setup_logger
 from core.utils.metric_logger import MetricLogger
 from core.utils.lovasz_loss import lovasz_softmax
 from core.utils.prototype_dist_estimator import prototype_dist_estimator
-from core.utils.loss import PrototypeContrastiveLoss
+from core.utils.loss import BerhuLoss, PrototypeContrastiveLoss
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -41,9 +41,7 @@ def strip_prefix_if_present(state_dict, prefix):
 
 
 def train(cfg, local_rank, distributed, logger):
-
-    device = torch.device(cfg.MODEL.DEVICE)
-
+    
     # Initialize wandb
     run = wandb.init(
         project = 'DA-ProSS',
@@ -51,12 +49,19 @@ def train(cfg, local_rank, distributed, logger):
         name = cfg.run_name
     )
 
+    device = torch.device(cfg.MODEL.DEVICE)
+    NUM_CLASSES = {"S": 16, "D": 1}
+    TASKNAMES = ["S", "D"]
+
     # create network
     feature_extractor = build_feature_extractor(cfg)
     feature_extractor.to(device)
 
-    classifier = build_classifier(cfg)
-    classifier.to(device)
+    classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
+    classifier['S'].to(device)
+    classifier['D'].to(device)
+    classifier['T'].to(device)
+    classifier['FS'].to(device)
 
     # batch size: half for source and half for target
     batch_size = cfg.SOLVER.BATCH_SIZE // 2
@@ -70,9 +75,10 @@ def train(cfg, local_rank, distributed, logger):
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups = [{'params': classifier['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    param_groups = [{'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    {'params': classifier['D'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
     optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
@@ -153,8 +159,10 @@ def train(cfg, local_rank, distributed, logger):
         # Custom Leaning rate adjustment
         current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
                                           power=cfg.SOLVER.LR_POWER)
+        
         for index in range(len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr
+
         for index in range(len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
@@ -168,49 +176,59 @@ def train(cfg, local_rank, distributed, logger):
         src_seg_label = src_seg_label.cuda(non_blocking=True).long()
         tgt_input = tgt_input.cuda(non_blocking=True)
         tgt_depth_label = tgt_depth_label.cuda(non_blocking=True).long()
-        src_size = src_input.shape[-2:]
+        
+        size = src_input.shape[-2:]
 
         # Source feature and classifier outputs
         src_feats = feature_extractor(src_input)
 
         src_feat_depth = src_feats['D']
-        src_feat_trans = src_feats['T']
         src_feat_seg = src_feats['S']
+        src_feat_trans = src_feats['T']
         src_feat_final_seg = src_feats['FS']
 
-        src_out_depth = classifier['D'](src_feat_depth)
-        src_out_seg = classifier['S'](src_feat_seg)
-        src_out_final_seg = classifier['FS'](src_feat_final_seg) 
+        src_out_depth = classifier['D'](src_feat_depth, size)
+        src_out_seg = classifier['S'](src_feat_seg, size)
+        src_out_trans = classifier['T'](src_feat_trans, size)
+        src_out_final_seg = classifier['FS'](src_feat_final_seg, size) 
 
 
         # Target feature and classifier outputs
         tgt_feats = feature_extractor(tgt_input)
 
         tgt_feat_depth = tgt_feats['D']
-        tgt_feat_trans = tgt_feats['T']
         tgt_feat_seg = tgt_feats['S']
+        tgt_feat_trans = tgt_feats['T']
         tgt_feat_final_seg = tgt_feats['FS']
 
-        tgt_out_depth = classifier['D'](tgt_feat_depth)
-        tgt_out_seg = classifier['S'](tgt_feat_seg)
-        tgt_out_final_seg = classifier['FS'](tgt_feat_final_seg) 
+        tgt_out_depth = classifier['D'](tgt_feat_depth, size)
+        tgt_out_seg = classifier['S'](tgt_feat_seg, size)
+        tgt_out_trans = classifier['T'](tgt_feat_trans, size)
+        tgt_out_final_seg = classifier['FS'](tgt_feat_final_seg, size)
 
 # ----------------------------------------------------------------------------
         # Supervision loss
         if cfg.SOLVER.LAMBDA_LOV > 0:
-            pred_softmax = F.softmax(src_out_seg, dim=1)
-            pred_softmax_final = F.softmax(src_out_final_seg, dim=1)
+            src_softmax_seg = F.softmax(src_out_seg, dim=1)
+            src_softmax_trans = F.softmax(src_out_trans, dim=1)
+            src_softmax_final = F.softmax(src_out_final_seg, dim=1)
 
-            loss_lov = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
-            loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
+            loss_lov = lovasz_softmax(src_softmax_seg, src_seg_label, ignore=255)
+            loss_lov_trans = lovasz_softmax(src_softmax_trans, src_seg_label, ignore=255)
+            loss_lov_final = lovasz_softmax(src_softmax_final, src_seg_label, ignore=255)
 
-            loss = ce_criterion(src_out_seg, src_seg_label) + cfg.SOLVER.LAMBDA_LOV * (loss_lov + loss_lov_final) \
-                    + berhu_criterion(src_out_depth,src_depth_label)
+            # Combining all the losses
+            loss_sup = ce_criterion(src_out_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
+                    ce_criterion(src_out_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
+                    ce_criterion(src_out_final_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + \
+                    (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(src_out_depth, src_depth_label))
+             
             meters.update(loss_lov=loss_lov.item())
+            meters.update(loss_lov_trans=loss_lov_trans.item())
+            meters.update(loss_lov_final=loss_lov_final.item())
         else:
-            loss = ce_criterion(src_out_seg, src_seg_label) + ce_criterion(src_out_final_seg, src_seg_label) \
-                    + berhu_criterion(src_out_depth,src_depth_label)
-
+            loss_sup = ce_criterion(src_out_seg, src_seg_label) + ce_criterion(src_out_final_seg, src_seg_label) \
+                    + ce_criterion(src_out_trans, src_seg_label) + berhu_criterion(src_out_depth,src_depth_label)
 
 
         # source mask: downsample the ground-truth label
@@ -291,9 +309,8 @@ def train(cfg, local_rank, distributed, logger):
         # Wandb Train Log
         wandb.log({
             "loss": loss.item(),
-            "loss_lov": loss_lov.item(),
-            # "loss_sup": loss_sup.item(),
-            "loss_dep_feat": loss_feat.item(),
+            "loss_sup": loss_sup.item(),
+            "loss_feat": loss_feat.item(),
             "loss_out": loss_out.item(),
             "lr": current_lr,
             "batch_time": batch_time,

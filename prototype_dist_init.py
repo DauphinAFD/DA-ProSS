@@ -112,7 +112,8 @@ def prototype_dist_init(cfg, logger):
             src_mask = src_mask.contiguous().view(B * Hs * Ws, )
 
             # feature level
-            src_feat = src_feat.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
+            src_feat_seg = src_feat_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
+            src_feat_trans = src_feat_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
             feat_seg_estimator.update(features=src_feat_seg.detach().clone(), labels=src_mask)
             feat_dep_estimator.update(features=src_feat_trans.detach().clone(), labels=src_mask)
             merged_estimator.merge_update(proto1=feat_dep_estimator.Proto, 

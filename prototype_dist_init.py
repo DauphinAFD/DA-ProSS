@@ -37,8 +37,8 @@ def prototype_dist_init(cfg, logger):
     _, backbone_name = cfg.MODEL.NAME.split('_')
     feature_num = 2048 if backbone_name.startswith('resnet') else 1024
 
-    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
-    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='S', cfg=cfg)
+    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='D', cfg=cfg)
     merged_estimator = prototype_dist_estimator(feature_num=feature_num*2, cfg=cfg)
 
     out_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, cfg=cfg)

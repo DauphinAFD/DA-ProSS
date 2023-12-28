@@ -131,8 +131,8 @@ def train(cfg, local_rank, distributed, logger):
     feature_num = 2048 if backbone_name.startswith('resnet') else 1024
 
     # Create prototypes
-    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
-    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='S', cfg=cfg)
+    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='D', cfg=cfg)
     merged_estimator = prototype_dist_estimator(feature_num=feature_num*2, cfg=cfg)
 
     if cfg.SOLVER.MULTI_LEVEL:

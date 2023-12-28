@@ -46,7 +46,7 @@ def train(cfg, local_rank, distributed, logger):
     run = wandb.init(
         project = 'DA-ProSS',
         config = cfg,
-        name = cfg.run_name
+        # name = cfg.run_name
     )
 
     device = torch.device(cfg.MODEL.DEVICE)
@@ -95,14 +95,14 @@ def train(cfg, local_rank, distributed, logger):
         classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
             checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
-        if "optimizer_fea" in checkpoint:
-            logger.info("Loading optimizer_fea from {}".format(cfg.resume))
-            optimizer_fea.load(checkpoint['optimizer_fea'])
-        if "optimizer_cls" in checkpoint:
-            logger.info("Loading optimizer_cls from {}".format(cfg.resume))
-            optimizer_cls.load(checkpoint['optimizer_cls'])
-        if "iteration" in checkpoint:
-            iteration = checkpoint['iteration']
+        # if "optimizer_fea" in checkpoint:
+        #     logger.info("Loading optimizer_fea from {}".format(cfg.resume))
+        #     optimizer_fea.load(checkpoint['optimizer_fea'])
+        # if "optimizer_cls" in checkpoint:
+        #     logger.info("Loading optimizer_cls from {}".format(cfg.resume))
+        #     optimizer_cls.load(checkpoint['optimizer_cls'])
+        # if "iteration" in checkpoint:
+        #     iteration = checkpoint['iteration']
 
     # init data loader
     src_train_data = build_dataset(cfg, mode='train', is_source=True)

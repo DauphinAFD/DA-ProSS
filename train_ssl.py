@@ -266,13 +266,14 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     end = time.time()
     
     with torch.no_grad():
-        for i, (x, y, _) in enumerate(test_loader):
+        for i, (x, y, _, _) in enumerate(test_loader):
             x = x.cuda(non_blocking=True)
             y = y.cuda(non_blocking=True).long()
 
             size = y.shape[-2:]
 
-            output = classifier['FS'](feature_extractor(x))
+            out = feature_extractor(x)
+            output = classifier['FS'](out['FS'])
 
             output = F.interpolate(output, size=size, mode='bilinear', align_corners=True)
             output = output.max(1)[1]

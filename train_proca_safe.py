@@ -86,18 +86,23 @@ def train(cfg, local_rank, distributed, logger):
 
     output_dir = cfg.OUTPUT_DIR
 
-
-    # load checkpoint
-    # if cfg.resume:
-    #     logger.info("Loading checkpoint from {}".format(cfg.resume))
-    #     checkpoint = torch.load(cfg.resume, map_location=torch.device('cpu'))
-    #     feature_weights = checkpoint['feature_extractor'] if distributed else strip_prefix_if_present(
-    #         checkpoint['feature_extractor'], 'module.')
-    #     feature_extractor.load_state_dict(feature_weights)
-    #     classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
-    #         checkpoint['classifier'], 'module.')
-    #     classifier.load_state_dict(classifier_weights)
-
+    if cfg.resume:
+        logger.info("Loading checkpoint from {}".format(cfg.resume))
+        checkpoint = torch.load(cfg.resume, map_location=torch.device('cpu'))
+        model_weights = checkpoint['feature_extractor'] if distributed else strip_prefix_if_present(
+            checkpoint['feature_extractor'], 'module.')
+        feature_extractor.load_state_dict(model_weights)
+        classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
+            checkpoint['classifier'], 'module.')
+        classifier.load_state_dict(classifier_weights)
+        if "optimizer_fea" in checkpoint:
+            logger.info("Loading optimizer_fea from {}".format(cfg.resume))
+            optimizer_fea.load(checkpoint['optimizer_fea'])
+        if "optimizer_cls" in checkpoint:
+            logger.info("Loading optimizer_cls from {}".format(cfg.resume))
+            optimizer_cls.load(checkpoint['optimizer_cls'])
+        if "iteration" in checkpoint:
+            iteration = checkpoint['iteration']
 
     # init data loader
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
@@ -145,7 +150,10 @@ def train(cfg, local_rank, distributed, logger):
     logger.info(">>>>>>>>>>>>>>>> Start Training >>>>>>>>>>>>>>>>")
 
     feature_extractor.train()
-    classifier.train()
+    classifier['S'].train()
+    classifier['D'].train()
+    classifier['T'].train()
+    classifier['FS'].train()
 
     best_mIoU = 0
     best_iteration = 0
@@ -155,6 +163,9 @@ def train(cfg, local_rank, distributed, logger):
     # Modify data loader
     for i, ((src_input, src_seg_label, src_depth_label, src_name), (tgt_input, tgt_depth_label,_, _)) in enumerate(zip(src_train_loader, tgt_train_loader)):
         data_time = time.time() - end
+
+        optimizer_fea.zero_grad()
+        optimizer_cls.zero_grad()
 
         # Custom Leaning rate adjustment
         current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
@@ -167,8 +178,6 @@ def train(cfg, local_rank, distributed, logger):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
 
-        optimizer_fea.zero_grad()
-        optimizer_cls.zero_grad()
 
         # Initialize inputs
         src_input = src_input.cuda(non_blocking=True)
@@ -418,18 +427,26 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
         test_sampler = None
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False, num_workers=4,
                                               pin_memory=True, sampler=test_sampler)
+    
     feature_extractor.eval()
-    classifier.eval()
+    classifier['S'].eval()
+    classifier['D'].eval()
+    classifier['T'].eval()
+    classifier['FS'].eval()
+
     end = time.time()
     with torch.no_grad():
-        for i, (x, y, _) in enumerate(test_loader):
+        for i, (x, y, _, _) in enumerate(test_loader):
             x = x.cuda(non_blocking=True)
             y = y.cuda(non_blocking=True).long()
 
             size = y.shape[-2:]
-            output = classifier(feature_extractor(x))
+            out = feature_extractor(x)
+            output = classifier['FS'](out['FS'])
+
             output = F.interpolate(output, size=size, mode='bilinear', align_corners=True)
             output = output.max(1)[1]
+            
             intersection, union, target = intersectionAndUnionGPU(output, y, cfg.MODEL.NUM_CLASSES,
                                                                   cfg.INPUT.IGNORE_LABEL)
             if distributed:

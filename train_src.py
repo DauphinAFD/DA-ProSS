@@ -22,7 +22,7 @@ from core.utils.misc import mkdir, AverageMeter, intersectionAndUnionGPU
 from core.utils.logger import setup_logger
 from core.utils.metric_logger import MetricLogger
 from core.utils.lovasz_loss import lovasz_softmax
-from core.utils.loss import BerhuLoss
+from core.utils.loss import BerhuLoss, CrossEntropy2d
 
 
 import warnings
@@ -68,18 +68,16 @@ def train(cfg, local_rank, distributed, logger):
     if local_rank == 0:
         logger.info(feature_extractor)
         logger.info(classifier)
-    #     logger.info("Depth Feature")
-    #     logger.info(feature_extractor.task_prediction_heads.layers['D'])
 
 
     optimizer_fea = torch.optim.SGD(feature_extractor.optim_parameters(cfg.SOLVER.BASE_LR), momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups = [{'params': classifier['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR},
-                {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    param_groups = [{'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    {'params': classifier['D'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
     optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
@@ -127,8 +125,8 @@ def train(cfg, local_rank, distributed, logger):
                                                sampler=train_sampler,
                                                drop_last=True)
 
-    ce_criterion = torch.nn.CrossEntropyLoss(ignore_index=255)
-    berhu_criterion = BerhuLoss(ignore_index=255).cuda()
+    ce_criterion = CrossEntropy2d().cuda()
+    berhu_criterion = BerhuLoss().cuda()
 
     max_iters = cfg.SOLVER.MAX_ITER
     logger.info("Start training")
@@ -149,6 +147,9 @@ def train(cfg, local_rank, distributed, logger):
     for i, (src_input, src_seg_label, src_depth_label, _) in enumerate(train_loader):
         data_time = time.time() - end
 
+        optimizer_fea.zero_grad()
+        optimizer_cls.zero_grad()
+
         current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
                                           power=cfg.SOLVER.LR_POWER)
         
@@ -156,12 +157,11 @@ def train(cfg, local_rank, distributed, logger):
         for index in range(1, len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr * 10
         
-        optimizer_cls.param_groups[index]['lr'] = current_lr * 5
         for index in range(len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
-        optimizer_fea.zero_grad()
-        optimizer_cls.zero_grad()
+        
+
         src_input = src_input.cuda(non_blocking=True)
         src_seg_label = src_seg_label.cuda(non_blocking=True).long()
         src_depth_label = src_depth_label.cuda(non_blocking=True).long()
@@ -186,13 +186,13 @@ def train(cfg, local_rank, distributed, logger):
 
             loss = ce_criterion(pred_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
                 ce_criterion(pred_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
-                    ce_criterion(pred_seg_final, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + (0.01 * berhu_criterion(pred_depth, src_depth_label)) 
+                    ce_criterion(pred_seg_final, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(pred_depth, src_depth_label)) 
             
             meters.update(loss_lov=loss_lov.item())
             meters.update(loss_lov_trans=loss_lov_trans.item())
             meters.update(loss_lov_final=loss_lov_final.item())
         else:
-            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_trans, src_seg_label) + ce_criterion(pred_seg_final, src_seg_label) + (0.01 * berhu_criterion(pred_depth, src_depth_label))
+            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_trans, src_seg_label) + ce_criterion(pred_seg_final, src_seg_label) + (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(pred_depth, src_depth_label))
 
         loss.backward()
 

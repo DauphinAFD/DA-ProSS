@@ -145,7 +145,7 @@ class resnet_feature_extractor(nn.Module):
         output['T'] = out1
         for task in self.auxilary_tasks:
             output[task] = out[task]
-        # output['FS'] = torch.cat((out1,out['S']), dim=1)
+        #
         output['FS'] =  self.final_prediction(output)
         return output
 
@@ -243,7 +243,7 @@ class SABlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(SABlock, self).__init__()
         self.attention = nn.Sequential(nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
-                                        nn.Sigmoid())
+                                        nn.ReLU(inplace=True))
         self.conv = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
 
     def forward(self, x):

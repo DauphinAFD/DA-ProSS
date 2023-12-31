@@ -46,7 +46,7 @@ def train(cfg, local_rank, distributed, logger):
     run = wandb.init(
         project = 'DA-ProSS',
         config = cfg,
-        name = cfg.run_name
+        # name = cfg.run_name
     )
 
     device = torch.device(cfg.MODEL.DEVICE)
@@ -95,14 +95,14 @@ def train(cfg, local_rank, distributed, logger):
         classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
             checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
-        if "optimizer_fea" in checkpoint:
-            logger.info("Loading optimizer_fea from {}".format(cfg.resume))
-            optimizer_fea.load(checkpoint['optimizer_fea'])
-        if "optimizer_cls" in checkpoint:
-            logger.info("Loading optimizer_cls from {}".format(cfg.resume))
-            optimizer_cls.load(checkpoint['optimizer_cls'])
-        if "iteration" in checkpoint:
-            iteration = checkpoint['iteration']
+        # if "optimizer_fea" in checkpoint:
+        #     logger.info("Loading optimizer_fea from {}".format(cfg.resume))
+        #     optimizer_fea.load(checkpoint['optimizer_fea'])
+        # if "optimizer_cls" in checkpoint:
+        #     logger.info("Loading optimizer_cls from {}".format(cfg.resume))
+        #     optimizer_cls.load(checkpoint['optimizer_cls'])
+        # if "iteration" in checkpoint:
+        #     iteration = checkpoint['iteration']
 
     # init data loader
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
@@ -131,8 +131,8 @@ def train(cfg, local_rank, distributed, logger):
     feature_num = 2048 if backbone_name.startswith('resnet') else 1024
 
     # Create prototypes
-    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
-    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='S', cfg=cfg)
+    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='D', cfg=cfg)
     merged_estimator = prototype_dist_estimator(feature_num=feature_num*2, cfg=cfg)
 
     if cfg.SOLVER.MULTI_LEVEL:
@@ -186,7 +186,8 @@ def train(cfg, local_rank, distributed, logger):
         tgt_input = tgt_input.cuda(non_blocking=True)
         tgt_depth_label = tgt_depth_label.cuda(non_blocking=True).long()
         
-        size = src_input.shape[-2:]
+        src_size = src_input.shape[-2:]
+        tgt_size = tgt_input.shape[-2:]
 
         # Source feature and classifier outputs
         src_feats = feature_extractor(src_input)
@@ -196,10 +197,10 @@ def train(cfg, local_rank, distributed, logger):
         src_feat_trans = src_feats['T']
         src_feat_final_seg = src_feats['FS']
 
-        src_out_depth = classifier['D'](src_feat_depth, size)
-        src_out_seg = classifier['S'](src_feat_seg, size)
-        src_out_trans = classifier['T'](src_feat_trans, size)
-        src_out_final_seg = classifier['FS'](src_feat_final_seg, size) 
+        src_out_depth = classifier['D'](src_feat_depth)
+        src_out_seg = classifier['S'](src_feat_seg)
+        src_out_trans = classifier['T'](src_feat_trans)
+        src_out_final_seg = classifier['FS'](src_feat_final_seg) 
 
 
         # Target feature and classifier outputs
@@ -210,28 +211,38 @@ def train(cfg, local_rank, distributed, logger):
         tgt_feat_trans = tgt_feats['T']
         tgt_feat_final_seg = tgt_feats['FS']
 
-        tgt_out_depth = classifier['D'](tgt_feat_depth, size)
-        tgt_out_seg = classifier['S'](tgt_feat_seg, size)
-        tgt_out_trans = classifier['T'](tgt_feat_trans, size)
-        tgt_out_final_seg = classifier['FS'](tgt_feat_final_seg, size)
+        tgt_out_depth = classifier['D'](tgt_feat_depth)
+        tgt_out_seg = classifier['S'](tgt_feat_seg)
+        tgt_out_trans = classifier['T'](tgt_feat_trans)
+        tgt_out_final_seg = classifier['FS'](tgt_feat_final_seg)
+
+        
 
 # ----------------------------------------------------------------------------
+        src_pred_seg = F.interpolate(src_out_seg, size=src_size, mode='bilinear', align_corners=True)
+        src_pred_trans = F.interpolate(src_out_trans, size=src_size, mode='bilinear', align_corners=True)
+        src_pred_final_seg = F.interpolate(src_out_final_seg, size=src_size, mode='bilinear', align_corners=True)
+
+        src_pred_depth = F.interpolate(src_out_depth, size=src_size, mode='bilinear', align_corners=True)
+        tgt_pred_depth = F.interpolate(tgt_out_depth, size=tgt_size, mode='bilinear', align_corners=True)
+
+
         # Supervision loss
         if cfg.SOLVER.LAMBDA_LOV > 0:
-            src_softmax_seg = F.softmax(src_out_seg, dim=1)
-            src_softmax_trans = F.softmax(src_out_trans, dim=1)
-            src_softmax_final = F.softmax(src_out_final_seg, dim=1)
+            src_softmax_seg = F.softmax(src_pred_seg, dim=1)
+            src_softmax_trans = F.softmax(src_pred_trans, dim=1)
+            src_softmax_final = F.softmax(src_pred_final_seg, dim=1)
 
             loss_lov = lovasz_softmax(src_softmax_seg, src_seg_label, ignore=255)
             loss_lov_trans = lovasz_softmax(src_softmax_trans, src_seg_label, ignore=255)
             loss_lov_final = lovasz_softmax(src_softmax_final, src_seg_label, ignore=255)
 
             # Combining all the losses
-            loss_sup = ce_criterion(src_out_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
-                    ce_criterion(src_out_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
-                    ce_criterion(src_out_final_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + \
-                    (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(src_out_depth, src_depth_label)) + \
-                    (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(tgt_out_depth, tgt_depth_label))
+            loss_sup = ce_criterion(src_pred_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
+                    ce_criterion(src_pred_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
+                    ce_criterion(src_pred_final_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + \
+                    (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(src_pred_depth, src_depth_label)) + \
+                    (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(tgt_pred_depth, tgt_depth_label))
              
             meters.update(loss_lov=loss_lov.item())
             meters.update(loss_lov_trans=loss_lov_trans.item())
@@ -242,60 +253,84 @@ def train(cfg, local_rank, distributed, logger):
 
 
         # source mask: downsample the ground-truth label
-        B, A, Hs, Ws = src_feat.size()
+        B, A, Hs, Ws = src_feat_seg.size()
         src_mask = F.interpolate(src_seg_label.unsqueeze(0).float(), size=(Hs, Ws), mode='nearest').squeeze(0).long()
         src_mask = src_mask.contiguous().view(B * Hs * Ws, )
         assert not src_mask.requires_grad
 
+        
+
         # target mask: constant threshold -- cfg.SOLVER.THRESHOLD
-        _, _, Ht, Wt = tgt_feat.size()
+        _, _, Ht, Wt = tgt_feat_seg.size()
         tgt_out_maxvalue, tgt_mask = torch.max(tgt_out_final_seg, dim=1)
         for i in range(cfg.MODEL.NUM_CLASSES):
             tgt_mask[(tgt_out_maxvalue < cfg.SOLVER.DELTA) * (tgt_mask == i)] = 255
         tgt_mask = tgt_mask.contiguous().view(B * Ht * Wt, )
         assert not tgt_mask.requires_grad
 
-        src_feat = src_feat.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, A)
-        tgt_feat = tgt_feat.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, A)
+        
+
+        src_feat_seg = src_feat_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, A)
+        tgt_feat_seg = tgt_feat_seg.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, A)
+
+        src_feat_trans = src_feat_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, A)
+        tgt_feat_trans = tgt_feat_trans.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, A)
+
+        
 
 
         # Update feature-level prototype statistics
         feat_dep_estimator.update(features=src_feat_trans.detach(), labels=src_mask)
         feat_dep_estimator.update(features=tgt_feat_trans.detach(), labels=tgt_mask)
 
+        
+
         feat_seg_estimator.update(features=src_feat_seg.detach(), labels=src_mask)
         feat_seg_estimator.update(features=tgt_feat_seg.detach(), labels=tgt_mask)
+
+        
 
         merged_estimator.merge_update(proto1=feat_dep_estimator.Proto, 
                                       proto2=feat_seg_estimator.Proto, 
                                       amount=feat_dep_estimator.Amount)
+        
+        
 
 
         # contrastive loss on both domains
-        loss_feat = pcl_criterion(Proto=merged_estimator.Proto.detach(),
-                                  feat=src_feat,
+        loss_feat = pcl_criterion(Proto=feat_seg_estimator.Proto.detach(),
+                                  feat=src_feat_seg,
                                   labels=src_mask) \
-                    + pcl_criterion(Proto=merged_estimator.Proto.detach(),
-                                  feat=tgt_feat,
+                    + pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
+                                  feat=src_feat_trans,
+                                  labels=src_mask) \
+                    + pcl_criterion(Proto=feat_seg_estimator.Proto.detach(),
+                                  feat=tgt_feat_seg,
+                                  labels=tgt_mask) \
+                    + pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
+                                  feat=tgt_feat_trans,
                                   labels=tgt_mask)
         meters.update(loss_feat=loss_feat.item())       # Logger
+
+        
 
 
         # Output level prototypes
         if cfg.SOLVER.MULTI_LEVEL:
-            src_out = src_out.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
-            tgt_out = tgt_out.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
+            src_out_final_seg = src_out_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
+            tgt_out_final_seg = tgt_out_seg.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
 
+            
             # update output-level statistics
-            out_estimator.update(features=tgt_out.detach(), labels=tgt_mask)
-            out_estimator.update(features=src_out.detach(), labels=src_mask)
+            out_estimator.update(features=tgt_out_final_seg.detach(), labels=tgt_mask)
+            out_estimator.update(features=src_out_final_seg.detach(), labels=src_mask)
 
             # the proposed contrastive loss on prediction map
             loss_out = pcl_criterion(Proto=out_estimator.Proto.detach(),
-                                     feat=src_out,
+                                     feat=src_out_final_seg,
                                      labels=src_mask) \
                        + pcl_criterion(Proto=out_estimator.Proto.detach(),
-                                       feat=tgt_out,
+                                       feat=tgt_out_final_seg,
                                        labels=tgt_mask)
             meters.update(loss_out=loss_out.item())
 
@@ -304,6 +339,8 @@ def train(cfg, local_rank, distributed, logger):
                    + cfg.SOLVER.LAMBDA_OUT * loss_out
         else:
             loss = loss_sup + cfg.SOLVER.LAMBDA_FEAT * loss_feat
+
+        # print("SAfe")
 
 
         loss.backward()
@@ -378,7 +415,6 @@ def train(cfg, local_rank, distributed, logger):
                 "mIoU": current_mIoU,
                 "mAcc": current_mAcc,
                 "allAcc": current_allAcc,
-                "total_time": total_time_str            
             })
 
         if iteration == cfg.SOLVER.MAX_ITER:

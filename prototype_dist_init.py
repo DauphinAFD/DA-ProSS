@@ -102,7 +102,7 @@ def prototype_dist_init(cfg, logger):
             src_feat_seg = src_feats['S']
             src_feat_final_seg = src_feats['FS']
 
-            src_out_final_seg = classifier['FS'](src_feat_final_seg, size)
+            src_out_final_seg = classifier['FS'](src_feat_final_seg)
 
             B, N, Hs, Ws = src_feat_seg.size()
             _, C, _, _ = src_out_final_seg.size()

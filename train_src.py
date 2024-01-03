@@ -179,19 +179,24 @@ def train(cfg, local_rank, distributed, logger):
             pred_softmax_trans = F.softmax(pred_trans, dim=1)
             pred_softmax_final = F.softmax(pred_seg_final, dim=1)
 
-            loss_lov = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
+            loss_lov_seg = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
             loss_lov_trans = lovasz_softmax(pred_softmax_trans, src_seg_label, ignore=255)
             loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
 
-            loss = ce_criterion(pred_seg, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov ) + \
-                ce_criterion(pred_trans, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
-                    ce_criterion(pred_seg_final, src_seg_label) + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(pred_depth, src_depth_label)) 
+            ce_seg = ce_criterion(pred_seg, src_seg_label)
+            ce_trans = ce_criterion(pred_trans, src_seg_label)
+            ce_final = ce_criterion(pred_seg_final, src_seg_label)
+            loss_depth = berhu_criterion(pred_depth, src_depth_label)
+
+            loss = ce_seg + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_seg ) + \
+                ce_trans + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
+                    ce_final + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + (cfg.SOLVER.LAMBDA_DEPTH * loss_depth) 
             
-            meters.update(loss_lov=loss_lov.item())
+            meters.update(loss_lov=loss_lov_seg.item())
             meters.update(loss_lov_trans=loss_lov_trans.item())
             meters.update(loss_lov_final=loss_lov_final.item())
         else:
-            loss = ce_criterion(pred_seg, src_seg_label) + ce_criterion(pred_trans, src_seg_label) + ce_criterion(pred_seg_final, src_seg_label) + (cfg.SOLVER.LAMBDA_DEPTH * berhu_criterion(pred_depth, src_depth_label))
+            loss = ce_seg + ce_trans + ce_final + (cfg.SOLVER.LAMBDA_DEPTH * loss_depth)
 
         loss.backward()
 
@@ -206,7 +211,13 @@ def train(cfg, local_rank, distributed, logger):
         # Wandb Train Log
         wandb.log({
             "loss": loss.item(),
-            "loss_lov": loss_lov.item(),
+            "loss_ce_seg": ce_seg.item(),
+            "loss_ce_trans": ce_trans.item(),
+            "loss_ce_final": ce_final.item(),
+            "loss_lov_seg": loss_lov_seg.item(),
+            "loss_lov_trans": loss_lov_trans.item(),
+            "loss_lov_final": loss_lov_final.item(),
+            "loss_depth": loss_depth.item(),
             "lr": current_lr,
             "batch_time": batch_time,
         })
@@ -328,7 +339,7 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
 
     end = time.time()
     with torch.no_grad():
-        for i, (x, y, _) in enumerate(test_loader):
+        for i, (x, y, _, _) in enumerate(test_loader):
             x = x.cuda(non_blocking=True)
             y = y.cuda(non_blocking=True).long()
             

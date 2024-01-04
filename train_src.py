@@ -375,9 +375,9 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
             trans_intersection_meter.update(trans_intersection), trans_union_meter.update(trans_union), trans_target_meter.update(trans_target)
             final_intersection_meter.update(final_intersection), final_union_meter.update(final_union), final_target_meter.update(seg_target)
 
-            seg_accuracy = sum(seg_intersection_meter.val) / (sum(seg_target_meter.val) + 1e-10)
-            trans_accuracy = sum(trans_intersection_meter.val) / (sum(trans_target_meter.val) + 1e-10)
-            final_accuracy = sum(final_intersection_meter.val) / (sum(final_target_meter.val) + 1e-10)
+            # seg_accuracy = sum(seg_intersection_meter.val) / (sum(seg_target_meter.val) + 1e-10)
+            # trans_accuracy = sum(trans_intersection_meter.val) / (sum(trans_target_meter.val) + 1e-10)
+            # final_accuracy = sum(final_intersection_meter.val) / (sum(final_target_meter.val) + 1e-10)
             batch_time.update(time.time() - end)
             end = time.time()
 

@@ -22,7 +22,7 @@ from core.utils.misc import mkdir, AverageMeter, intersectionAndUnionGPU
 from core.utils.logger import setup_logger
 from core.utils.metric_logger import MetricLogger
 from core.utils.lovasz_loss import lovasz_softmax
-from core.utils.loss import BerhuLoss, CrossEntropy2d
+from core.utils.loss import BerhuLoss
 
 
 import warnings
@@ -124,7 +124,7 @@ def train(cfg, local_rank, distributed, logger):
                                                sampler=train_sampler,
                                                drop_last=True)
 
-    ce_criterion = CrossEntropy2d().cuda()
+    ce_criterion = torch.nn.CrossEntropyLoss(ignore_index=255)
     berhu_criterion = BerhuLoss().cuda()
 
     max_iters = cfg.SOLVER.MAX_ITER
@@ -401,8 +401,8 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     
     if local_rank == 0:
         logger.info("Val seg result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_seg, mAcc_seg, allAcc_seg))
-        logger.info("Val trans result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_seg, mAcc_seg, allAcc_seg))
-        logger.info("Val final result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_seg, mAcc_seg, allAcc_seg))
+        logger.info("Val trans result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_trans, mAcc_trans, allAcc_trans))
+        logger.info("Val final result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_final, mAcc_final, allAcc_final))
         for i in range(cfg.MODEL.NUM_CLASSES):
             logger.info(
                 "Class_{} {} Result: iou/accuracy {:.4f}/{:.4f}.".format(i, test_data.trainid2name[i],

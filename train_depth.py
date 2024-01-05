@@ -56,10 +56,10 @@ def train(cfg, local_rank, distributed, logger):
     device = torch.device(cfg.MODEL.DEVICE)
     feature_extractor.to(device)
     # classifier.to(device)
-    classifier['S'].to(device)
+    # classifier['S'].to(device)
     classifier['D'].to(device)
-    classifier['T'].to(device)
-    classifier['FS'].to(device)
+    # classifier['T'].to(device)
+    # classifier['FS'].to(device)
 
     batch_size = cfg.SOLVER.BATCH_SIZE  # default: 8
     
@@ -69,14 +69,12 @@ def train(cfg, local_rank, distributed, logger):
         logger.info(classifier)
 
 
-    optimizer_fea = torch.optim.SGD(feature_extractor.optim_parameters(cfg.SOLVER.BASE_LR), momentum=cfg.SOLVER.MOMENTUM,
+    optimizer_fea = torch.optim.SGD(feature_extractor.optim_depth_parameters(cfg.SOLVER.BASE_LR), momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups = [{'params': classifier['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+
+    param_groups = [{'params': classifier['D'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
     optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
@@ -132,15 +130,15 @@ def train(cfg, local_rank, distributed, logger):
     meters = MetricLogger(delimiter="  ")
 
     feature_extractor.train()
-    classifier['S'].train()
+    # classifier['S'].train()
     classifier['D'].train()
-    classifier['T'].train()
-    classifier['FS'].train()
+    # classifier['T'].train()
+    # classifier['FS'].train()
 
     start_training_time = time.time()
     end = time.time()
 
-    best_mIoU = 0
+    best_Loss = 0
     best_iteration = 0
 
     for i, (src_input, src_seg_label, src_depth_label, _) in enumerate(train_loader):
@@ -156,54 +154,31 @@ def train(cfg, local_rank, distributed, logger):
         for index in range(1, len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr * 10
 
-        optimizer_cls.param_groups[0]['lr'] = current_lr * 5
-        for index in range(1, len(optimizer_cls.param_groups)):
+        for index in range(len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
         
 
         src_input = src_input.cuda(non_blocking=True)
-        src_seg_label = src_seg_label.cuda(non_blocking=True).long()
         src_depth_label = src_depth_label.cuda(non_blocking=True).long()
 
-        size = src_seg_label.shape[-2:]
+        size = src_depth_label.shape[-2:]
 
         src_feats = feature_extractor(src_input)
 
-        pred_seg = classifier['S'](src_feats['S'], size)
         pred_depth = classifier['D'](src_feats['D'], size)
-        pred_trans = classifier['T'](src_feats['T'], size)
-        pred_seg_final = classifier['FS'](src_feats['FS'], size)
 
-        if cfg.SOLVER.LAMBDA_LOV > 0:
-            pred_softmax = F.softmax(pred_seg, dim=1)
-            pred_softmax_trans = F.softmax(pred_trans, dim=1)
-            pred_softmax_final = F.softmax(pred_seg_final, dim=1)
+        
 
-            loss_lov_seg = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
-            loss_lov_trans = lovasz_softmax(pred_softmax_trans, src_seg_label, ignore=255)
-            loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
 
-            ce_seg = ce_criterion(pred_seg, src_seg_label)
-            ce_trans = ce_criterion(pred_trans, src_seg_label)
-            ce_final = ce_criterion(pred_seg_final, src_seg_label)
-            loss_depth = berhu_criterion(pred_depth, src_depth_label)
+        loss_depth = berhu_criterion(pred_depth, src_depth_label)
+          
 
-            loss = ce_seg + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_seg ) + \
-                ce_trans + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
-                    ce_final + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) + (cfg.SOLVER.LAMBDA_DEPTH * loss_depth) 
-            
-            meters.update(loss_lov=loss_lov_seg.item())
-            meters.update(loss_lov_trans=loss_lov_trans.item())
-            meters.update(loss_lov_final=loss_lov_final.item())
-        else:
-            loss = ce_seg + ce_trans + ce_final + (cfg.SOLVER.LAMBDA_DEPTH * loss_depth)
-
-        loss.backward()
+        loss_depth.backward()
 
         optimizer_fea.step()
         optimizer_cls.step()
-        meters.update(loss_seg=loss.item())
+        meters.update(loss_seg=loss_depth.item())
         iteration += 1
 
         batch_time = time.time() - end
@@ -211,13 +186,6 @@ def train(cfg, local_rank, distributed, logger):
 
         # Wandb Train Log
         wandb.log({
-            "loss": loss.item(),
-            "loss_ce_seg": ce_seg.item(),
-            "loss_ce_trans": ce_trans.item(),
-            "loss_ce_final": ce_final.item(),
-            "loss_lov_seg": loss_lov_seg.item(),
-            "loss_lov_trans": loss_lov_trans.item(),
-            "loss_lov_final": loss_lov_final.item(),
             "loss_depth": loss_depth.item(),
             "lr": current_lr,
             "batch_time": batch_time,
@@ -246,39 +214,31 @@ def train(cfg, local_rank, distributed, logger):
             )
 
         if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
-            mIoU_seg, mIoU_trans, mIoU_final = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
-
-            feature_extractor.train()
-            classifier['S'].train()
-            classifier['D'].train()
-            classifier['T'].train()
-            classifier['FS'].train()
 
             if save_to_disk:
                 # update best model
-                if mIoU_final > best_mIoU:
+                if loss_depth > best_Loss:
                     filename = os.path.join(output_dir, "model_best.pth")
                     torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
-                    best_mIoU = mIoU_final
+                    best_Loss = loss_depth
                     best_iteration = iteration
                 else:
                     filename = os.path.join(output_dir, "model_current.pth")
                     torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
-                logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
+                logger.info(f"-------- Best Loss {best_Loss} at iteration {best_iteration} --------")
 
             # Wandb Evaluation Log
             wandb.log({
-                "Current Best mIoU": best_mIoU,
-                "mIoU_seg": mIoU_seg,
-                "mIoU_trans": mIoU_trans,
-                "mIoU_final": mIoU_final,
+                "Current Best mIoU": best_Loss,
+                "loss_depth": loss_depth,
             })
 
             torch.cuda.empty_cache()
+
         if iteration == cfg.SOLVER.MAX_ITER:
             break
         if iteration == cfg.SOLVER.STOP_ITER:
@@ -295,121 +255,6 @@ def train(cfg, local_rank, distributed, logger):
         )
     )
 
-
-def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger):
-    if local_rank == 0:
-        logger.info('>>>>>>>>>>>>>>>> Start Testing >>>>>>>>>>>>>>>>')
-
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    loss_meter = AverageMeter()
-
-    seg_intersection_meter = AverageMeter()
-    seg_union_meter = AverageMeter()
-    seg_target_meter = AverageMeter()
-
-    trans_intersection_meter = AverageMeter()
-    trans_union_meter = AverageMeter()
-    trans_target_meter = AverageMeter()
-
-    final_intersection_meter = AverageMeter()
-    final_union_meter = AverageMeter()
-    final_target_meter = AverageMeter()
-
-    if distributed:
-        feature_extractor, classifier = feature_extractor.module, classifier.module
-    torch.cuda.empty_cache()
-    dataset_name = cfg.DATASETS.TEST
-    if cfg.OUTPUT_DIR:
-        output_folder = os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
-        mkdir(output_folder)
-
-    test_data = build_dataset(cfg, mode='test', is_source=False)
-    if distributed:
-        test_sampler = torch.utils.data.distributed.DistributedSampler(test_data)
-    else:
-        test_sampler = None
-    test_loader = torch.utils.data.DataLoader(test_data, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False, num_workers=4,
-                                              pin_memory=True, sampler=test_sampler)
-    
-    feature_extractor.eval()
-    classifier['S'].eval()
-    classifier['D'].eval()
-    classifier['T'].eval()
-    classifier['FS'].eval()
-
-    end = time.time()
-    with torch.no_grad():
-        for i, (x, y, _, _) in enumerate(test_loader):
-            x = x.cuda(non_blocking=True)
-            y = y.cuda(non_blocking=True).long()
-            
-            size = y.shape[-2:]
-            out = feature_extractor(x)
-
-            output_seg = classifier['S'](out['S'])
-            output_trans = classifier['T'](out['T'])
-            output_final = classifier['FS'](out['FS']) # Changed train_src
-
-            output_seg = F.interpolate(output_seg, size=size, mode='bilinear', align_corners=True)
-            output_seg = output_seg.max(1)[1]
-            output_trans = F.interpolate(output_trans, size=size, mode='bilinear', align_corners=True)
-            output_trans = output_trans.max(1)[1]
-            output_final = F.interpolate(output_final, size=size, mode='bilinear', align_corners=True)
-            output_final = output_final.max(1)[1]
-            
-            seg_intersection, seg_union, seg_target = intersectionAndUnionGPU(output_seg, y, cfg.MODEL.NUM_CLASSES,
-                                                                  cfg.INPUT.IGNORE_LABEL)
-            trans_intersection, trans_union, trans_target = intersectionAndUnionGPU(output_trans, y, cfg.MODEL.NUM_CLASSES,
-                                                                  cfg.INPUT.IGNORE_LABEL)
-            final_intersection, final_union, final_target = intersectionAndUnionGPU(output_final, y, cfg.MODEL.NUM_CLASSES,
-                                                                  cfg.INPUT.IGNORE_LABEL)
-            # if distributed:
-            #     torch.distributed.all_reduce(intersection), torch.distributed.all_reduce(
-            #         union), torch.distributed.all_reduce(target)
-                
-            seg_intersection, seg_union, seg_target = seg_intersection.cpu().numpy(), seg_union.cpu().numpy(), seg_target.cpu().numpy()
-            trans_intersection, trans_union, trans_target = trans_intersection.cpu().numpy(), trans_union.cpu().numpy(), trans_target.cpu().numpy()
-            final_intersection, final_union, final_target = final_intersection.cpu().numpy(), final_union.cpu().numpy(), final_target.cpu().numpy()
-            
-            seg_intersection_meter.update(seg_intersection), seg_union_meter.update(seg_union), seg_target_meter.update(seg_target)
-            trans_intersection_meter.update(trans_intersection), trans_union_meter.update(trans_union), trans_target_meter.update(trans_target)
-            final_intersection_meter.update(final_intersection), final_union_meter.update(final_union), final_target_meter.update(seg_target)
-
-            # seg_accuracy = sum(seg_intersection_meter.val) / (sum(seg_target_meter.val) + 1e-10)
-            # trans_accuracy = sum(trans_intersection_meter.val) / (sum(trans_target_meter.val) + 1e-10)
-            # final_accuracy = sum(final_intersection_meter.val) / (sum(final_target_meter.val) + 1e-10)
-            batch_time.update(time.time() - end)
-            end = time.time()
-
-    iou_class_seg = seg_intersection_meter.sum / (seg_union_meter.sum + 1e-10)
-    accuracy_class_seg = seg_intersection_meter.sum / (seg_target_meter.sum + 1e-10)
-    mIoU_seg = np.mean(iou_class_seg)
-    mAcc_seg = np.mean(accuracy_class_seg)
-    allAcc_seg = sum(seg_intersection_meter.sum) / (sum(seg_target_meter.sum) + 1e-10)
-
-    iou_class_trans = trans_intersection_meter.sum / (trans_union_meter.sum + 1e-10)
-    accuracy_class_trans = trans_intersection_meter.sum / (trans_target_meter.sum + 1e-10)
-    mIoU_trans = np.mean(iou_class_trans)
-    mAcc_trans = np.mean(accuracy_class_trans)
-    allAcc_trans = sum(trans_intersection_meter.sum) / (sum(trans_target_meter.sum) + 1e-10)
-
-    iou_class_final = final_intersection_meter.sum / (final_union_meter.sum + 1e-10)
-    accuracy_class_final = final_intersection_meter.sum / (final_target_meter.sum + 1e-10)
-    mIoU_final = np.mean(iou_class_final)
-    mAcc_final = np.mean(accuracy_class_final)
-    allAcc_final = sum(final_intersection_meter.sum) / (sum(final_target_meter.sum) + 1e-10)
-    
-    if local_rank == 0:
-        logger.info("Val seg result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_seg, mAcc_seg, allAcc_seg))
-        logger.info("Val trans result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_trans, mAcc_trans, allAcc_trans))
-        logger.info("Val final result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_final, mAcc_final, allAcc_final))
-        for i in range(cfg.MODEL.NUM_CLASSES):
-            logger.info(
-                "Class_{} {} Result: iou/accuracy {:.4f}/{:.4f}.".format(i, test_data.trainid2name[i],
-                                                                         iou_class_final[i], accuracy_class_final[i])
-            )
-    return mIoU_seg, mIoU_trans, mIoU_final
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Semantic Segmentation Training")

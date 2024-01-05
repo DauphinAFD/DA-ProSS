@@ -154,6 +154,10 @@ class resnet_feature_extractor(nn.Module):
                 {'params': self.task_prediction_heads.parameters(), 'lr': 10*learning_rate},
                 {'params': self.transfer.parameters(), 'lr': 10*learning_rate},
                 {'params': self.final_prediction.parameters(), 'lr': 10*learning_rate}]
+    
+    def optim_depth_parameters(self, learning_rate):
+        return [{'params': self.backbone.parameters(), 'lr': learning_rate},
+                {'params': self.task_prediction_heads.parameters(), 'lr': 10*learning_rate}]
  
 class resnet_feature_extractor_v2(nn.Module):
     _batchnorm = (nn.BatchNorm2d, nn.SyncBatchNorm, nn.GroupNorm)

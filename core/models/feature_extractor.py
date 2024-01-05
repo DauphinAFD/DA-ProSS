@@ -129,31 +129,31 @@ class resnet_feature_extractor(nn.Module):
             return_layers['layer3'] = 'aux'
         self.backbone = IntermediateLayerGetter(backbone, return_layers=return_layers)
         
-        self.tasks = TASKNAMES
-        self.auxilary_tasks = TASKNAMES
-        self.channels = 2048
-        # Task-specific heads for initial prediction
-        self.task_prediction_heads = TaskPredictionModule(self.auxilary_tasks, self.channels)
-        self.transfer = Transfer(self.channels )
-        self.final_prediction = FinalPredictionModule(self.channels)
+        # self.tasks = TASKNAMES
+        # self.auxilary_tasks = TASKNAMES
+        # self.channels = 2048
+        # # Task-specific heads for initial prediction
+        # self.task_prediction_heads = TaskPredictionModule(self.auxilary_tasks, self.channels)
+        # self.transfer = Transfer(self.channels )
+        # self.final_prediction = FinalPredictionModule(self.channels)
         
     def forward(self, x):
         out = self.backbone(x)['out']
-        out = self.task_prediction_heads(out)
-        out1 = self.transfer(out['D'])
-        output = {}
-        output['T'] = out1
-        for task in self.auxilary_tasks:
-            output[task] = out[task]
-        #
-        output['FS'] =  self.final_prediction(output)
-        return output
+        # out = self.task_prediction_heads(out)
+        # out1 = self.transfer(out['D'])
+        # output = {}
+        # output['T'] = out1
+        # for task in self.auxilary_tasks:
+        #     output[task] = out[task]
+        # #
+        # output['FS'] =  self.final_prediction(output)
+        return out
 
     def optim_parameters(self, learning_rate):
-        return [{'params': self.backbone.parameters(), 'lr': learning_rate},
-                {'params': self.task_prediction_heads.parameters(), 'lr': 10*learning_rate},
-                {'params': self.transfer.parameters(), 'lr': 10*learning_rate},
-                {'params': self.final_prediction.parameters(), 'lr': 10*learning_rate}]
+        return [{'params': self.backbone.parameters(), 'lr': learning_rate}]
+                # {'params': self.task_prediction_heads.parameters(), 'lr': 10*learning_rate},
+                # {'params': self.transfer.parameters(), 'lr': 10*learning_rate},
+                # {'params': self.final_prediction.parameters(), 'lr': 10*learning_rate}]
     
     def optim_depth_parameters(self, learning_rate):
         return [{'params': self.backbone.parameters(), 'lr': learning_rate},
@@ -185,37 +185,62 @@ class resnet_feature_extractor_v2(nn.Module):
                 if isinstance(m, resnet_feature_extractor_v2._batchnorm):
                     m.eval()
 
+# class TaskPredictionModule(nn.Module):
+#     """
+#         Make the initial task predictions from the backbone features.
+#     """
+#     def __init__(self, tasks, input_channels, intermediate_channels=2048):
+#         super(TaskPredictionModule, self).__init__() 
+#         self.tasks = tasks 
+#         layers = {}
+#         # conv_out = {}
+        
+#         for task in self.tasks:
+#             if input_channels != intermediate_channels:
+#                 downsample = nn.Sequential(nn.Conv2d(input_channels, intermediate_channels, kernel_size=1,
+#                                                     stride=1, bias=False), nn.BatchNorm2d(intermediate_channels))
+#             else:
+#                 downsample = None
+#             bottleneck1 = BottleneckPad(input_channels, intermediate_channels//4, downsample=downsample)
+#             bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
+#             # conv_out_ = nn.Conv2d(intermediate_channels, NUM_OUTPUT[task], 1)
+#             layers[task] = nn.Sequential(bottleneck1, bottleneck2)
+#             # conv_out[task] = conv_out_
+        
+#         self.layers = nn.ModuleDict(layers)
+#         # self.conv_out = nn.ModuleDict(conv_out)
+
+
+#     def forward(self, x):
+#         out = {}
+#         for task in self.tasks:
+#             out[task] = self.layers[task](x)
+#             # out[task] = self.conv_out[task](out[task])
+
+#         return out 
+                    
 class TaskPredictionModule(nn.Module):
     """
         Make the initial task predictions from the backbone features.
     """
     def __init__(self, tasks, input_channels, intermediate_channels=2048):
         super(TaskPredictionModule, self).__init__() 
-        self.tasks = tasks 
-        layers = {}
-        # conv_out = {}
         
-        for task in self.tasks:
-            if input_channels != intermediate_channels:
-                downsample = nn.Sequential(nn.Conv2d(input_channels, intermediate_channels, kernel_size=1,
-                                                    stride=1, bias=False), nn.BatchNorm2d(intermediate_channels))
-            else:
-                downsample = None
-            bottleneck1 = BottleneckPad(input_channels, intermediate_channels//4, downsample=downsample)
-            bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
-            # conv_out_ = nn.Conv2d(intermediate_channels, NUM_OUTPUT[task], 1)
-            layers[task] = nn.Sequential(bottleneck1, bottleneck2)
-            # conv_out[task] = conv_out_
+        if input_channels != intermediate_channels:
+            downsample = nn.Sequential(nn.Conv2d(input_channels, intermediate_channels, kernel_size=1,
+                                                stride=1, bias=False), nn.BatchNorm2d(intermediate_channels))
+        else:
+            downsample = None
+        bottleneck1 = BottleneckPad(input_channels, intermediate_channels//4, downsample=downsample)
+        bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
+        
+        layers = nn.Sequential(bottleneck1, bottleneck2)
         
         self.layers = nn.ModuleDict(layers)
-        # self.conv_out = nn.ModuleDict(conv_out)
 
 
     def forward(self, x):
-        out = {}
-        for task in self.tasks:
-            out[task] = self.layers[task](x)
-            # out[task] = self.conv_out[task](out[task])
+        out = self.layers(x)
 
         return out 
 
@@ -267,8 +292,8 @@ class FinalPredictionModule(nn.Module):
         self.self_attention = SABlock(channels, channels)
 
 
-    def forward(self, x):
-        adapters = self.self_attention(x['T'])
+    def forward(self, x, t):
+        adapters = self.self_attention(t)
         # out = x['S'] + torch.sum(torch.stack([v for v in adapters]), dim=0)
         out = x['S'] + adapters
         # out = x['S'] + torch.stack([v for v in adapters])

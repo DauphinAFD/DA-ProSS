@@ -50,16 +50,21 @@ def train(cfg, local_rank, distributed, logger):
         config = cfg
     )
 
-    feature_extractor = build_feature_extractor(cfg)
+    feature_extractor = build_feature_extractor(cfg, TASKNAMES)
     classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
 
     device = torch.device(cfg.MODEL.DEVICE)
-    feature_extractor.to(device)
+    feature_extractor['B'].to(device)
+    # feature_extractor['S'].to(device)
+    feature_extractor['D'].to(device)
+    # feature_extractor['T'].to(device)
+    # feature_extractor['FS'].to(device)
+
     # classifier.to(device)
-    classifier['S'].to(device)
+    # classifier['S'].to(device)
     classifier['D'].to(device)
-    classifier['T'].to(device)
-    classifier['FS'].to(device)
+    # classifier['T'].to(device)
+    # classifier['FS'].to(device)
 
     batch_size = cfg.SOLVER.BATCH_SIZE  # default: 8
     
@@ -68,21 +73,24 @@ def train(cfg, local_rank, distributed, logger):
         logger.info(feature_extractor)
         logger.info(classifier)
 
+    param_groups_fea = [{'params': feature_extractor['B'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR},
+                        {'params': feature_extractor['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR}]
+                        # {'params': feature_extractor['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                        # {'params': feature_extractor['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                        # {'params': feature_extractor['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
 
-    optimizer_fea = torch.optim.SGD(feature_extractor.optim_parameters(cfg.SOLVER.BASE_LR), momentum=cfg.SOLVER.MOMENTUM,
+    optimizer_fea = torch.optim.SGD(param_groups_fea, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups = [{'params': classifier['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR}]
+                    # {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    # {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    # {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
-    optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
+    optimizer_cls = torch.optim.SGD(param_groups_cls, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     
-    # optimizer_cls = torch.optim.SGD(classifier['S'].parameters(), lr = 10*cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
-    #                                 weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_cls.zero_grad()
 
     output_dir = cfg.OUTPUT_DIR
@@ -131,16 +139,21 @@ def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
     meters = MetricLogger(delimiter="  ")
 
-    feature_extractor.train()
-    classifier['S'].train()
+    feature_extractor['B'].train()
+    feature_extractor['D'].train()
+    # feature_extractor['S'].train()
+    # feature_extractor['T'].train()
+    # feature_extractor['FS'].train()
+    
     classifier['D'].train()
-    classifier['T'].train()
-    classifier['FS'].train()
+    # classifier['S'].train()
+    # classifier['T'].train()
+    # classifier['FS'].train()
 
     start_training_time = time.time()
     end = time.time()
 
-    best_mIoU = 0
+    best_Loss = 100000000
     best_iteration = 0
 
     for i, (src_input, src_seg_label, src_depth_label, _) in enumerate(train_loader):
@@ -163,47 +176,48 @@ def train(cfg, local_rank, distributed, logger):
         
 
         src_input = src_input.cuda(non_blocking=True)
-        src_seg_label = src_seg_label.cuda(non_blocking=True).lolovasz_softmaxng()
+        # src_seg_label = src_seg_label.cuda(non_blocking=True).lolovasz_softmaxng()
         src_depth_label = src_depth_label.cuda(non_blocking=True).long()
 
-        size = src_seg_label.shape[-2:]
+        size = src_depth_label.shape[-2:]
 
-        src_feats = feature_extractor(src_input)
+        src_feats_back = feature_extractor['B'](src_input)
+        src_feats_depth = feature_extractor['D'](src_feats_back)
 
-        pred_seg = classifier['S'](src_feats['S'], size)
-        pred_depth = classifier['D'](src_feats['D'], size)
-        pred_trans = classifier['T'](src_feats['T'], size)
-        pred_seg_final = classifier['FS'](src_feats['FS'], size)
+        # pred_seg = classifier['S'](src_feats['S'], size)
+        pred_depth = classifier['D'](src_feats_depth, size)
+        # pred_trans = classifier['T'](src_feats['T'], size)
+        # pred_seg_final = classifier['FS'](src_feats['FS'], size)
 
-        if cfg.SOLVER.LAMBDA_LOV > 0:
-            pred_softmax = F.softmax(pred_seg, dim=1)
-            pred_softmax_trans = F.softmax(pred_trans, dim=1)
-            pred_softmax_final = F.softmax(pred_seg_final, dim=1)
+        # if cfg.SOLVER.LAMBDA_LOV > 0:
+            # pred_softmax = F.softmax(pred_seg, dim=1)
+            # pred_softmax_trans = F.softmax(pred_trans, dim=1)
+            # pred_softmax_final = F.softmax(pred_seg_final, dim=1)
 
-            loss_lov_seg = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
-            loss_lov_trans = lovasz_softmax(pred_softmax_trans, src_seg_label, ignore=255)
-            loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
+            # loss_lov_seg = lovasz_softmax(pred_softmax, src_seg_label, ignore=255)
+            # loss_lov_trans = lovasz_softmax(pred_softmax_trans, src_seg_label, ignore=255)
+            # loss_lov_final = lovasz_softmax(pred_softmax_final, src_seg_label, ignore=255)
 
-            ce_seg = ce_criterion(pred_seg, src_seg_label)
-            ce_trans = ce_criterion(pred_trans, src_seg_label)
-            ce_final = ce_criterion(pred_seg_final, src_seg_label)
-            loss_depth = berhu_criterion(pred_depth, src_depth_label)
-
-            loss = 0*(ce_seg + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_seg ) + \
-                ce_trans + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
-                    ce_final + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) )+ (cfg.SOLVER.LAMBDA_DEPTH * loss_depth) 
+            # ce_seg = ce_criterion(pred_seg, src_seg_label)
+            # ce_trans = ce_criterion(pred_trans, src_seg_label)
+            # ce_final = ce_criterion(pred_seg_final, src_seg_label)
+        loss_depth = berhu_criterion(pred_depth, src_depth_label)
+        
+            # loss = 0*(ce_seg + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_seg ) + \
+            #     ce_trans + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_trans ) + \
+            #         ce_final + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_final ) )+ (cfg.SOLVER.LAMBDA_DEPTH * loss_depth) 
             
-            meters.update(loss_lov=loss_lov_seg.item())
-            meters.update(loss_lov_trans=loss_lov_trans.item())
-            meters.update(loss_lov_final=loss_lov_final.item())
-        else:
-            loss = ce_seg + ce_trans + ce_final + (cfg.SOLVER.LAMBDA_DEPTH * loss_depth)
+            # meters.update(loss_lov=loss_lov_seg.item())
+            # meters.update(loss_lov_trans=loss_lov_trans.item())
+            # meters.update(loss_lov_final=loss_lov_final.item())
+        # else:
+        #     loss = ce_seg + ce_trans + ce_final + (cfg.SOLVER.LAMBDA_DEPTH * loss_depth)
 
-        loss.backward()
+        loss_depth.backward()
 
         optimizer_fea.step()
         optimizer_cls.step()
-        meters.update(loss_seg=loss.item())
+        meters.update(loss_seg=loss_depth.item())
         iteration += 1
 
         batch_time = time.time() - end
@@ -211,13 +225,13 @@ def train(cfg, local_rank, distributed, logger):
 
         # Wandb Train Log
         wandb.log({
-            "loss": loss.item(),
-            "loss_ce_seg": ce_seg.item(),
-            "loss_ce_trans": ce_trans.item(),
-            "loss_ce_final": ce_final.item(),
-            "loss_lov_seg": loss_lov_seg.item(),
-            "loss_lov_trans": loss_lov_trans.item(),
-            "loss_lov_final": loss_lov_final.item(),
+            # "loss": loss.item(),
+            # "loss_ce_seg": ce_seg.item(),
+            # "loss_ce_trans": ce_trans.item(),
+            # "loss_ce_final": ce_final.item(),
+            # "loss_lov_seg": loss_lov_seg.item(),
+            # "loss_lov_trans": loss_lov_trans.item(),
+            # "loss_lov_final": loss_lov_final.item(),
             "loss_depth": loss_depth.item(),
             "lr": current_lr,
             "batch_time": batch_time,
@@ -246,36 +260,40 @@ def train(cfg, local_rank, distributed, logger):
             )
 
         if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
-            mIoU_seg, mIoU_trans, mIoU_final = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
+            # mIoU_seg, mIoU_trans, loss_depth = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
 
-            feature_extractor.train()
-            classifier['S'].train()
+            feature_extractor['B'].train()
+            feature_extractor['D'].train()
+            # feature_extractor['S'].train()
+            # feature_extractor['T'].train()
+            # feature_extractor['FS'].train()
             classifier['D'].train()
-            classifier['T'].train()
-            classifier['FS'].train()
+            # classifier['S'].train()
+            # classifier['T'].train()
+            # classifier['FS'].train()
 
             if save_to_disk:
                 # update best model
-                if mIoU_final > best_mIoU:
+                if loss_depth < best_Loss:
                     filename = os.path.join(output_dir, "model_best.pth")
                     torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
-                    best_mIoU = mIoU_final
+                    best_Loss = loss_depth
                     best_iteration = iteration
                 else:
                     filename = os.path.join(output_dir, "model_current.pth")
                     torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
-                logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
+                logger.info(f"-------- Best mIoU {best_Loss} at iteration {best_iteration} --------")
 
             # Wandb Evaluation Log
             wandb.log({
-                "Current Best mIoU": best_mIoU,
-                "mIoU_seg": mIoU_seg,
-                "mIoU_trans": mIoU_trans,
-                "mIoU_final": mIoU_final,
+                "Current Best best_Loss": best_Loss,
+                # "mIoU_seg": mIoU_seg,
+                # "mIoU_trans": mIoU_trans,
+                # "loss_depth": loss_depth,
             })
 
             torch.cuda.empty_cache()
@@ -332,11 +350,16 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False, num_workers=4,
                                               pin_memory=True, sampler=test_sampler)
     
-    feature_extractor.eval()
-    classifier['S'].eval()
+    feature_extractor['B'].eval()
+    feature_extractor['D'].eval()
+    # feature_extractor['S'].eval()
+    # feature_extractor['T'].eval()
+    # feature_extractor['FS'].eval()
+    
     classifier['D'].eval()
-    classifier['T'].eval()
-    classifier['FS'].eval()
+    # classifier['S'].eval()
+    # classifier['T'].eval()
+    # classifier['FS'].eval()
 
     end = time.time()
     with torch.no_grad():
@@ -396,20 +419,20 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
 
     iou_class_final = final_intersection_meter.sum / (final_union_meter.sum + 1e-10)
     accuracy_class_final = final_intersection_meter.sum / (final_target_meter.sum + 1e-10)
-    mIoU_final = np.mean(iou_class_final)
+    loss_depth = np.mean(iou_class_final)
     mAcc_final = np.mean(accuracy_class_final)
     allAcc_final = sum(final_intersection_meter.sum) / (sum(final_target_meter.sum) + 1e-10)
     
     if local_rank == 0:
         logger.info("Val seg result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_seg, mAcc_seg, allAcc_seg))
         logger.info("Val trans result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_trans, mAcc_trans, allAcc_trans))
-        logger.info("Val final result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_final, mAcc_final, allAcc_final))
+        logger.info("Val final result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(loss_depth, mAcc_final, allAcc_final))
         for i in range(cfg.MODEL.NUM_CLASSES):
             logger.info(
                 "Class_{} {} Result: iou/accuracy {:.4f}/{:.4f}.".format(i, test_data.trainid2name[i],
                                                                          iou_class_final[i], accuracy_class_final[i])
             )
-    return mIoU_seg, mIoU_trans, mIoU_final
+    return mIoU_seg, mIoU_trans, loss_depth
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Semantic Segmentation Training")

@@ -234,10 +234,8 @@ class TaskPredictionModule(nn.Module):
         bottleneck1 = BottleneckPad(input_channels, intermediate_channels//4, downsample=downsample)
         bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
         
-        layers = nn.Sequential(bottleneck1, bottleneck2)
-        
-        self.layers = nn.ModuleDict(layers)
-
+        self.layers = nn.Sequential(bottleneck1, bottleneck2)
+    
 
     def forward(self, x):
         out = self.layers(x)

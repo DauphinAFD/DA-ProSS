@@ -290,10 +290,10 @@ class FinalPredictionModule(nn.Module):
         self.self_attention = SABlock(channels, channels)
 
 
-    def forward(self, x, t):
+    def forward(self, s, t):
         adapters = self.self_attention(t)
         # out = x['S'] + torch.sum(torch.stack([v for v in adapters]), dim=0)
-        out = x['S'] + adapters
+        out = s + adapters
         # out = x['S'] + torch.stack([v for v in adapters])
         return out
     

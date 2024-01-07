@@ -76,15 +76,15 @@ def train(cfg, local_rank, distributed, logger):
 
     param_groups_fea = [{'params': feature_extractor['B'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
                         {'params': feature_extractor['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                        {'params': feature_extractor['T'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                        {'params': feature_extractor['S'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                        {'params': feature_extractor['FS'].parameters(), 'lr': cfg.SOLVER.BASE_LR}]
+                        {'params': feature_extractor['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                        {'params': feature_extractor['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                        {'params': feature_extractor['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
     optimizer_fea = torch.optim.SGD(param_groups_fea, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR},
+    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 1*cfg.SOLVER.BASE_LR},
                     {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
@@ -170,10 +170,11 @@ def train(cfg, local_rank, distributed, logger):
                                           power=cfg.SOLVER.LR_POWER)
         
         optimizer_fea.param_groups[0]['lr'] = current_lr
-        for index in range(1, len(optimizer_fea.param_groups)):
+        optimizer_fea.param_groups[1]['lr'] = current_lr
+        for index in range(2, len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr * 10
 
-        optimizer_cls.param_groups[0]['lr'] = current_lr * 5
+        optimizer_cls.param_groups[0]['lr'] = current_lr
         for index in range(1, len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 

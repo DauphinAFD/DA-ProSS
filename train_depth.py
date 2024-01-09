@@ -79,10 +79,10 @@ def train(cfg, local_rank, distributed, logger):
                         # {'params': feature_extractor['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                         # {'params': feature_extractor['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
 
-    # optimizer_fea = torch.optim.SGD(param_groups_fea, momentum=cfg.SOLVER.MOMENTUM,
-    #                                 weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    optimizer_fea = torch.optim.SGD(param_groups_fea, momentum=cfg.SOLVER.MOMENTUM,
+                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     
-    optimizer_fea = torch.optim.Adam(param_groups_fea, betas=(0.9, 0.99))
+    # optimizer_fea = torch.optim.Adam(param_groups_fea, betas=(0.9, 0.99),weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
     param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
@@ -90,10 +90,10 @@ def train(cfg, local_rank, distributed, logger):
                     # {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     # {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
-    # optimizer_cls = torch.optim.SGD(param_groups_cls, momentum=cfg.SOLVER.MOMENTUM,
-    #                                 weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    optimizer_cls = torch.optim.SGD(param_groups_cls, momentum=cfg.SOLVER.MOMENTUM,
+                                    weight_decay=cfg.SOLVER.WEIGHT_DECAY)
 
-    optimizer_cls = torch.optim.Adam(param_groups_cls, betas=(0.9, 0.99))
+    # optimizer_cls = torch.optim.Adam(param_groups_cls, betas=(0.9, 0.99),weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_cls.zero_grad()
 
     output_dir = cfg.OUTPUT_DIR

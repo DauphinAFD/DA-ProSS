@@ -265,18 +265,18 @@ class Transfer(nn.Module):
         return out
 
 
-class SABlock(nn.Module):
-    """ Spatial self-attention block """
-    def __init__(self, in_channels, out_channels):
-        super(SABlock, self).__init__()
-        self.attention = nn.Sequential(nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
-                                        nn.ReLU(inplace=True))
-        self.conv = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
+# class SABlock(nn.Module):
+#     """ Spatial self-attention block """
+#     def __init__(self, in_channels, out_channels):
+#         super(SABlock, self).__init__()
+#         self.attention = nn.Sequential(nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+#                                         nn.ReLU(inplace=True))
+#         self.conv = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
 
-    def forward(self, x):
-        attention_mask = self.attention(x)
-        features = self.conv(x)
-        return torch.mul(features, attention_mask)
+#     def forward(self, x):
+#         attention_mask = self.attention(x)
+#         features = self.conv(x)
+#         return torch.mul(features, attention_mask)
 
 class FinalPredictionModule(nn.Module):
     """
@@ -287,13 +287,16 @@ class FinalPredictionModule(nn.Module):
     def __init__(self, channels):
         super(FinalPredictionModule, self).__init__()
 
-        self.self_attention = SABlock(channels, channels)
+        # self.self_attention = SABlock(channels, channels)
+        self.attention = nn.Sequential(nn.Conv2d(channels*2, channels*2, 3, padding=1, bias=False),
+                                        nn.ReLU(inplace=True))
 
 
     def forward(self, s, t):
-        adapters = self.self_attention(t)
+        out = torch.cat((s,t), dim=1)
+
+        # out = self.attention(out)
         # out = x['S'] + torch.sum(torch.stack([v for v in adapters]), dim=0)
-        out = s + adapters
         # out = x['S'] + torch.stack([v for v in adapters])
         return out
     

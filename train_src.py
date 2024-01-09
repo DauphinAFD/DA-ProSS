@@ -75,16 +75,25 @@ def train(cfg, local_rank, distributed, logger):
         logger.info(classifier)
 
     param_groups_fea = [{'params': feature_extractor['B'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                        {'params': feature_extractor['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
+                        {'params': feature_extractor['D'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                         {'params': feature_extractor['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                         {'params': feature_extractor['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                         {'params': feature_extractor['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
-    
+
     optimizer_fea = torch.optim.SGD(param_groups_fea, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 1*cfg.SOLVER.BASE_LR},
+
+    # param_fea_depth = [{'params': feature_extractor['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
+    #                     {'params': feature_extractor['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    
+    # optimizer_fea_depth = torch.optim.Adam(param_fea_depth, betas=(0.9, 0.99), 
+    #                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
+    # optimizer_fea_depth.zero_grad()
+
+
+    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR},
                     {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
@@ -92,8 +101,6 @@ def train(cfg, local_rank, distributed, logger):
     optimizer_cls = torch.optim.SGD(param_groups_cls, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     
-    # optimizer_cls = torch.optim.SGD(classifier['S'].parameters(), lr = 10*cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
-    #                                 weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_cls.zero_grad()
 
     output_dir = cfg.OUTPUT_DIR
@@ -164,18 +171,23 @@ def train(cfg, local_rank, distributed, logger):
         data_time = time.time() - end
 
         optimizer_fea.zero_grad()
+        # optimizer_fea_depth.zero_grad()
         optimizer_cls.zero_grad()
 
         current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
                                           power=cfg.SOLVER.LR_POWER)
         
         optimizer_fea.param_groups[0]['lr'] = current_lr
-        optimizer_fea.param_groups[1]['lr'] = current_lr
         for index in range(2, len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr * 10
 
-        optimizer_cls.param_groups[0]['lr'] = current_lr
-        for index in range(1, len(optimizer_cls.param_groups)):
+        # optimizer_fea_depth.param_groups[0]['lr'] = current_lr
+        # for index in range(1, len(optimizer_fea_depth.param_groups)):
+        #     optimizer_fea_depth.param_groups[index]['lr'] = current_lr * 10
+
+
+        optimizer_cls.param_groups[0]['lr'] = current_lr * 1
+        for index in range(1,len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
         
@@ -224,6 +236,7 @@ def train(cfg, local_rank, distributed, logger):
         loss.backward()
 
         optimizer_fea.step()
+        # optimizer_fea_depth.step()
         optimizer_cls.step()
         meters.update(loss_seg=loss.item())
         iteration += 1

@@ -4,7 +4,7 @@ import datetime
 import logging
 import time
 import numpy as np
-
+import wandb
 import torch
 import torch.nn.functional as F
 import torch.utils.data
@@ -39,11 +39,22 @@ def train(cfg, local_rank, distributed, logger):
     NUM_CLASSES = {"S": 16, "D": 1}
     TASKNAMES = ["S", "D"]
 
-    feature_extractor = build_feature_extractor(cfg)
+    run = wandb.init(
+        project = 'DA-ProSS',
+        config = cfg
+    )
+
+    feature_extractor = build_feature_extractor(cfg, TASKNAMES)
     classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
 
     device = torch.device(cfg.MODEL.DEVICE)
-    feature_extractor.to(device)
+    # feature_extractor.to(device)
+    feature_extractor['B'].to(device)
+    feature_extractor['S'].to(device)
+    feature_extractor['D'].to(device)
+    feature_extractor['T'].to(device)
+    feature_extractor['FS'].to(device)
+
     # classifier.to(device)
     classifier['S'].to(device)
     classifier['D'].to(device)
@@ -56,18 +67,26 @@ def train(cfg, local_rank, distributed, logger):
         print(feature_extractor)
         print(classifier)
 
-    optimizer_fea = torch.optim.SGD(feature_extractor.parameters(), lr=cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
+    param_groups_fea = [{'params': feature_extractor['B'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
+                        {'params': feature_extractor['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
+                        {'params': feature_extractor['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                        {'params': feature_extractor['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                        {'params': feature_extractor['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    
+    optimizer_fea = torch.optim.SGD(param_groups_fea, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups = [{'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['D'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 1*cfg.SOLVER.BASE_LR},
                     {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
-    optimizer_cls = torch.optim.SGD(param_groups, momentum=cfg.SOLVER.MOMENTUM,
+    optimizer_cls = torch.optim.SGD(param_groups_cls, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     
+    # optimizer_cls = torch.optim.SGD(classifier['S'].parameters(), lr = 10*cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM,
+    #                                 weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_cls.zero_grad()
 
     output_dir = cfg.OUTPUT_DIR
@@ -85,14 +104,14 @@ def train(cfg, local_rank, distributed, logger):
         classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
             checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
-        if "optimizer_fea" in checkpoint:
-            logger.info("Loading optimizer_fea from {}".format(cfg.resume))
-            optimizer_fea.load(checkpoint['optimizer_fea'])
-        if "optimizer_cls" in checkpoint:
-            logger.info("Loading optimizer_cls from {}".format(cfg.resume))
-            optimizer_cls.load(checkpoint['optimizer_cls'])
-        if "iteration" in checkpoint:
-            iteration = checkpoint['iteration']
+        # if "optimizer_fea" in checkpoint:
+        #     logger.info("Loading optimizer_fea from {}".format(cfg.resume))
+        #     optimizer_fea.load(checkpoint['optimizer_fea'])
+        # if "optimizer_cls" in checkpoint:
+        #     logger.info("Loading optimizer_cls from {}".format(cfg.resume))
+        #     optimizer_cls.load(checkpoint['optimizer_cls'])
+        # if "iteration" in checkpoint:
+        #     iteration = checkpoint['iteration']
 
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
 
@@ -118,7 +137,12 @@ def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
     meters = MetricLogger(delimiter="  ")
     
-    feature_extractor.train()
+    feature_extractor['B'].train()
+    feature_extractor['D'].train()
+    feature_extractor['S'].train()
+    feature_extractor['T'].train()
+    feature_extractor['FS'].train()
+    
     classifier['S'].train()
     classifier['D'].train()
     classifier['T'].train()
@@ -133,6 +157,9 @@ def train(cfg, local_rank, distributed, logger):
     for i, (src_input, src_label, src_depth_label, _) in enumerate(train_loader):
         data_time = time.time() - end
 
+        optimizer_fea.zero_grad()
+        optimizer_cls.zero_grad()
+        
         current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
                                           power=cfg.SOLVER.LR_POWER)
         optimizer_fea.param_groups[0]['lr'] = current_lr
@@ -143,8 +170,6 @@ def train(cfg, local_rank, distributed, logger):
         for index in range(len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
-        optimizer_fea.zero_grad()
-        optimizer_cls.zero_grad()
         
         src_input = src_input.cuda(non_blocking=True)
         src_seg_label = src_seg_label.cuda(non_blocking=True).long()
@@ -152,15 +177,19 @@ def train(cfg, local_rank, distributed, logger):
 
         size = src_seg_label.shape[-2:]
         
-        src_feats = feature_extractor(src_input)
+        src_feats_back = feature_extractor['B'](src_input)
+        src_feats_seg = feature_extractor['S'](src_feats_back)
+        src_feats_depth = feature_extractor['D'](src_feats_back)
+        src_feats_trans = feature_extractor['T'](src_feats_depth)
+        src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
-        src_out_seg = classifier['S'](src_feats['S'], size)
-        src_out_depth = classifier['D'](src_feats['D'], size)
-        src_out_trans = classifier['T'](src_feats['T'], size)
-        src_out_final_seg = classifier['FS'](src_feats['FS'], size)
+        pred_seg = classifier['S'](src_feats_seg, size)
+        pred_depth = classifier['D'](src_feats_depth, size)
+        pred_trans = classifier['T'](src_feats_trans, size)
+        pred_seg_final = classifier['FS'](src_feats_final, size)
 
 
-        loss = ce_criterion(src_out_final_seg, src_label)
+        loss = ce_criterion(pred_seg_final, src_label)
         loss.backward()
 
         optimizer_fea.step()
@@ -170,6 +199,13 @@ def train(cfg, local_rank, distributed, logger):
 
         batch_time = time.time() - end
         end = time.time()
+
+        wandb.log({
+            "loss": loss.item(),
+            "lr": current_lr,
+            "batch_time": batch_time,
+        })
+
         meters.update(time=batch_time, data=data_time)
         eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
         eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
@@ -194,7 +230,12 @@ def train(cfg, local_rank, distributed, logger):
 
         if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
             current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
-            feature_extractor.train()
+            
+            feature_extractor['B'].train()
+            feature_extractor['D'].train()
+            feature_extractor['S'].train()
+            feature_extractor['T'].train()
+            feature_extractor['FS'].train()
             classifier['S'].train()
             classifier['D'].train()
             classifier['T'].train()
@@ -224,6 +265,9 @@ def train(cfg, local_rank, distributed, logger):
 
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
+
+    wandb.finish()
+
     logger.info(
         "Total training time: {} ({:.4f} s / it)".format(
             total_time_str, total_training_time / cfg.SOLVER.STOP_ITER
@@ -237,9 +281,18 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     batch_time = AverageMeter()
     data_time = AverageMeter()
     loss_meter = AverageMeter()
-    intersection_meter = AverageMeter()
-    union_meter = AverageMeter()
-    target_meter = AverageMeter()
+
+    seg_intersection_meter = AverageMeter()
+    seg_union_meter = AverageMeter()
+    seg_target_meter = AverageMeter()
+
+    trans_intersection_meter = AverageMeter()
+    trans_union_meter = AverageMeter()
+    trans_target_meter = AverageMeter()
+
+    final_intersection_meter = AverageMeter()
+    final_union_meter = AverageMeter()
+    final_target_meter = AverageMeter()
 
     if distributed:
         feature_extractor, classifier = feature_extractor.module, classifier.module
@@ -257,53 +310,93 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False, num_workers=4,
                                               pin_memory=True, sampler=test_sampler)
     
-    feature_extractor.eval()
+    feature_extractor['B'].eval()
+    feature_extractor['D'].eval()
+    feature_extractor['S'].eval()
+    feature_extractor['T'].eval()
+    feature_extractor['FS'].eval()
     classifier['S'].eval()
     classifier['D'].eval()
     classifier['T'].eval()
     classifier['FS'].eval()
-    
+
     end = time.time()
-    
     with torch.no_grad():
         for i, (x, y, _, _) in enumerate(test_loader):
             x = x.cuda(non_blocking=True)
             y = y.cuda(non_blocking=True).long()
-
+            
             size = y.shape[-2:]
 
-            out = feature_extractor(x)
-            output = classifier['FS'](out['FS'])
+            src_feats_back = feature_extractor['B'](x)
+            src_feats_seg = feature_extractor['S'](src_feats_back)
+            src_feats_depth = feature_extractor['D'](src_feats_back)
+            src_feats_trans = feature_extractor['T'](src_feats_depth)
+            src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
-            output = F.interpolate(output, size=size, mode='bilinear', align_corners=True)
-            output = output.max(1)[1]
+            output_seg = classifier['S'](src_feats_seg)
+            output_trans = classifier['T'](src_feats_trans)
+            output_final = classifier['FS'](src_feats_final)
 
-            intersection, union, target = intersectionAndUnionGPU(output, y, cfg.MODEL.NUM_CLASSES,
+            output_seg = F.interpolate(output_seg, size=size, mode='bilinear', align_corners=True)
+            output_seg = output_seg.max(1)[1]
+            output_trans = F.interpolate(output_trans, size=size, mode='bilinear', align_corners=True)
+            output_trans = output_trans.max(1)[1]
+            output_final = F.interpolate(output_final, size=size, mode='bilinear', align_corners=True)
+            output_final = output_final.max(1)[1]
+            
+            seg_intersection, seg_union, seg_target = intersectionAndUnionGPU(output_seg, y, cfg.MODEL.NUM_CLASSES,
                                                                   cfg.INPUT.IGNORE_LABEL)
-            if distributed:
-                torch.distributed.all_reduce(intersection), torch.distributed.all_reduce(
-                    union), torch.distributed.all_reduce(target)
-            intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
-            intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
+            trans_intersection, trans_union, trans_target = intersectionAndUnionGPU(output_trans, y, cfg.MODEL.NUM_CLASSES,
+                                                                  cfg.INPUT.IGNORE_LABEL)
+            final_intersection, final_union, final_target = intersectionAndUnionGPU(output_final, y, cfg.MODEL.NUM_CLASSES,
+                                                                  cfg.INPUT.IGNORE_LABEL)
+            # if distributed:
+            #     torch.distributed.all_reduce(intersection), torch.distributed.all_reduce(
+            #         union), torch.distributed.all_reduce(target)
+                
+            seg_intersection, seg_union, seg_target = seg_intersection.cpu().numpy(), seg_union.cpu().numpy(), seg_target.cpu().numpy()
+            trans_intersection, trans_union, trans_target = trans_intersection.cpu().numpy(), trans_union.cpu().numpy(), trans_target.cpu().numpy()
+            final_intersection, final_union, final_target = final_intersection.cpu().numpy(), final_union.cpu().numpy(), final_target.cpu().numpy()
+            
+            seg_intersection_meter.update(seg_intersection), seg_union_meter.update(seg_union), seg_target_meter.update(seg_target)
+            trans_intersection_meter.update(trans_intersection), trans_union_meter.update(trans_union), trans_target_meter.update(trans_target)
+            final_intersection_meter.update(final_intersection), final_union_meter.update(final_union), final_target_meter.update(seg_target)
 
-            accuracy = sum(intersection_meter.val) / (sum(target_meter.val) + 1e-10)
+            # seg_accuracy = sum(seg_intersection_meter.val) / (sum(seg_target_meter.val) + 1e-10)
+            # trans_accuracy = sum(trans_intersection_meter.val) / (sum(trans_target_meter.val) + 1e-10)
+            # final_accuracy = sum(final_intersection_meter.val) / (sum(final_target_meter.val) + 1e-10)
             batch_time.update(time.time() - end)
             end = time.time()
 
-    iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
-    accuracy_class = intersection_meter.sum / (target_meter.sum + 1e-10)
-    mIoU = np.mean(iou_class)
-    mAcc = np.mean(accuracy_class)
-    allAcc = sum(intersection_meter.sum) / (sum(target_meter.sum) + 1e-10)
+    iou_class_seg = seg_intersection_meter.sum / (seg_union_meter.sum + 1e-10)
+    accuracy_class_seg = seg_intersection_meter.sum / (seg_target_meter.sum + 1e-10)
+    mIoU_seg = np.mean(iou_class_seg)
+    mAcc_seg = np.mean(accuracy_class_seg)
+    allAcc_seg = sum(seg_intersection_meter.sum) / (sum(seg_target_meter.sum) + 1e-10)
+
+    iou_class_trans = trans_intersection_meter.sum / (trans_union_meter.sum + 1e-10)
+    accuracy_class_trans = trans_intersection_meter.sum / (trans_target_meter.sum + 1e-10)
+    mIoU_trans = np.mean(iou_class_trans)
+    mAcc_trans = np.mean(accuracy_class_trans)
+    allAcc_trans = sum(trans_intersection_meter.sum) / (sum(trans_target_meter.sum) + 1e-10)
+
+    iou_class_final = final_intersection_meter.sum / (final_union_meter.sum + 1e-10)
+    accuracy_class_final = final_intersection_meter.sum / (final_target_meter.sum + 1e-10)
+    mIoU_final = np.mean(iou_class_final)
+    mAcc_final = np.mean(accuracy_class_final)
+    allAcc_final = sum(final_intersection_meter.sum) / (sum(final_target_meter.sum) + 1e-10)
     
     if local_rank == 0:
-        logger.info("Val result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU, mAcc, allAcc))
+        logger.info("Val seg result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_seg, mAcc_seg, allAcc_seg))
+        logger.info("Val trans result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_trans, mAcc_trans, allAcc_trans))
+        logger.info("Val final result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}".format(mIoU_final, mAcc_final, allAcc_final))
         for i in range(cfg.MODEL.NUM_CLASSES):
             logger.info(
                 "Class_{} {} Result: iou/accuracy {:.4f}/{:.4f}.".format(i, test_data.trainid2name[i],
-                                                                         iou_class[i], accuracy_class[i])
+                                                                         iou_class_final[i], accuracy_class_final[i])
             )
-    return mIoU, mAcc, allAcc
+    return mIoU_seg, mIoU_trans, mIoU_final
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Semantic Segmentation Training")

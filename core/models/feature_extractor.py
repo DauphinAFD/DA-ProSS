@@ -295,7 +295,7 @@ class FinalPredictionModule(nn.Module):
     def forward(self, s, t):
         out = torch.cat((s,t), dim=1)
 
-        # out = self.attention(out)
+        out = self.attention(out)
         # out = x['S'] + torch.sum(torch.stack([v for v in adapters]), dim=0)
         # out = x['S'] + torch.stack([v for v in adapters])
         return out

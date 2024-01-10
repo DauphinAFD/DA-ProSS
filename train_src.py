@@ -93,7 +93,7 @@ def train(cfg, local_rank, distributed, logger):
     # optimizer_fea_depth.zero_grad()
 
 
-    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 5*cfg.SOLVER.BASE_LR},
+    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
                     {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
@@ -178,7 +178,7 @@ def train(cfg, local_rank, distributed, logger):
                                           power=cfg.SOLVER.LR_POWER)
         
         optimizer_fea.param_groups[0]['lr'] = current_lr
-        for index in range(2, len(optimizer_fea.param_groups)):
+        for index in range(1, len(optimizer_fea.param_groups)):
             optimizer_fea.param_groups[index]['lr'] = current_lr * 10
 
         # optimizer_fea_depth.param_groups[0]['lr'] = current_lr
@@ -186,8 +186,8 @@ def train(cfg, local_rank, distributed, logger):
         #     optimizer_fea_depth.param_groups[index]['lr'] = current_lr * 10
 
 
-        optimizer_cls.param_groups[0]['lr'] = current_lr * 1
-        for index in range(1,len(optimizer_cls.param_groups)):
+        # optimizer_cls.param_groups[0]['lr'] = current_lr * 1
+        for index in range(len(optimizer_cls.param_groups)):
             optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
         
@@ -483,15 +483,15 @@ def main():
     )
 
     args = parser.parse_args()
-    args.local_rank =  int(os.environ["LOCAL_RANK"])
+    # args.local_rank =  int(os.environ["LOCAL_RANK"])
 
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
 
-    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
-    args.distributed = num_gpus > 1
+    # num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    args.distributed = False
 
-    if args.distributed:
+    if args.distributed :
         torch.cuda.set_device(args.local_rank)
         torch.distributed.init_process_group(
             backend="nccl", init_method="env://"
@@ -505,8 +505,9 @@ def main():
     if output_dir:
         mkdir(output_dir)
 
+    args.local_rank = 0
     logger = setup_logger("SourceOnly", output_dir, args.local_rank)
-    logger.info("Using {} GPUs".format(num_gpus))
+    logger.info("Using {} GPUs".format(1))
     logger.info(args)
 
     logger.info("Loaded configuration file {}".format(args.config_file))

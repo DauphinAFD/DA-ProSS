@@ -48,8 +48,12 @@ def prototype_dist_init(cfg, logger):
     NUM_CLASSES = {"S": 16, "D": 1}
     TASKNAMES = ["S", "D"]
     
-    feature_extractor = build_feature_extractor(cfg)
-    feature_extractor.to(device)
+    feature_extractor = build_feature_extractor(cfg, TASKNAMES)
+    feature_extractor['B'].to(device)
+    feature_extractor['S'].to(device)
+    feature_extractor['D'].to(device)
+    feature_extractor['T'].to(device)
+    feature_extractor['FS'].to(device)
 
     classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
     classifier['S'].to(device)
@@ -78,8 +82,17 @@ def prototype_dist_init(cfg, logger):
                                                    pin_memory=True,
                                                    drop_last=False)
     iteration = 0
-    feature_extractor.eval()
-    classifier.eval()
+
+    feature_extractor['B'].eval()
+    feature_extractor['D'].eval()
+    feature_extractor['S'].eval()
+    feature_extractor['T'].eval()
+    feature_extractor['FS'].eval()
+    classifier['S'].eval()
+    classifier['D'].eval()
+    classifier['T'].eval()
+    classifier['FS'].eval()
+
     end = time.time()
     start_time = time.time()
     max_iters = len(src_train_loader)
@@ -97,14 +110,19 @@ def prototype_dist_init(cfg, logger):
 
             size = src_seg_label.shape[-2:]
 
-            src_feats = feature_extractor(src_input)
-            src_feat_trans = src_feats['T']
-            src_feat_seg = src_feats['S']
-            src_feat_final_seg = src_feats['FS']
+            src_feats_back = feature_extractor['B'](src_input)
+            src_feats_seg = feature_extractor['S'](src_feats_back)
+            src_feats_depth = feature_extractor['D'](src_feats_back)
+            src_feats_trans = feature_extractor['T'](src_feats_depth)
+            src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
-            src_out_final_seg = classifier['FS'](src_feat_final_seg)
 
-            B, N, Hs, Ws = src_feat_seg.size()
+            # src_out_depth = classifier['D'](src_feats_depth)
+            # src_out_seg = classifier['S'](src_feats_seg)
+            # src_out_trans = classifier['T'](src_feats_trans)
+            src_out_final_seg = classifier['FS'](src_feats_final) 
+
+            B, N, Hs, Ws = src_feats_seg.size()
             _, C, _, _ = src_out_final_seg.size()
 
             # source mask: downsample the ground-truth label
@@ -112,10 +130,10 @@ def prototype_dist_init(cfg, logger):
             src_mask = src_mask.contiguous().view(B * Hs * Ws, )
 
             # feature level
-            src_feat_seg = src_feat_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
-            src_feat_trans = src_feat_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
-            feat_seg_estimator.update(features=src_feat_seg.detach().clone(), labels=src_mask)
-            feat_dep_estimator.update(features=src_feat_trans.detach().clone(), labels=src_mask)
+            src_feats_seg = src_feats_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
+            src_feats_trans = src_feats_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
+            feat_seg_estimator.update(features=src_feats_seg.detach().clone(), labels=src_mask)
+            feat_dep_estimator.update(features=src_feats_trans.detach().clone(), labels=src_mask)
             merged_estimator.merge_update(proto1=feat_dep_estimator.Proto, 
                                           proto2=feat_seg_estimator.Proto, 
                                           amount=feat_dep_estimator.Amount)

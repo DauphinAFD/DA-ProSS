@@ -9,7 +9,7 @@ import wandb
 
 import torch
 import torch.utils
-import torch.distributed
+# import torch.distributed
 import torch.utils.data
 import torch.nn as nn
 import torch.nn.functional as F
@@ -481,8 +481,8 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     final_union_meter = AverageMeter()
     final_target_meter = AverageMeter()
 
-    if distributed:
-        feature_extractor, classifier = feature_extractor.module, classifier.module
+    # if distributed:
+    #     feature_extractor, classifier = feature_extractor.module, classifier.module
     torch.cuda.empty_cache()
     dataset_name = cfg.DATASETS.TEST
     if cfg.OUTPUT_DIR:
@@ -490,10 +490,10 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
         mkdir(output_folder)
 
     test_data = build_dataset(cfg, mode='test', is_source=False)
-    if distributed:
-        test_sampler = torch.utils.data.distributed.DistributedSampler(test_data)
-    else:
-        test_sampler = None
+    # if distributed:
+    #     test_sampler = torch.utils.data.distributed.DistributedSampler(test_data)
+    # else:
+    test_sampler = None
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False, num_workers=4,
                                               pin_memory=True, sampler=test_sampler)
     
@@ -594,7 +594,7 @@ def main():
                         metavar="FILE",
                         help="path to config file",
                         type=str)
-    parser.add_argument("--local_rank", type=int, default=0)
+    # parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument(
         "--skip-test",
         dest="skip_test",
@@ -612,14 +612,14 @@ def main():
 
     torch.backends.cudnn.benchmark = True
 
-    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
-    args.distributed = num_gpus > 1
+    num_gpus = 1 #int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    args.distributed = False #num_gpus > 1
 
-    if args.distributed:
-        torch.cuda.set_device(args.local_rank)
-        torch.distributed.init_process_group(
-            backend="nccl", init_method="env://"
-        )
+    # if args.distributed:
+    #     torch.cuda.set_device(args.local_rank)
+    #     torch.distributed.init_process_group(
+    #         backend="nccl", init_method="env://"
+    #     )
 
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)

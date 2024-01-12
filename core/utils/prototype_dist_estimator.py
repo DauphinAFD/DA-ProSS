@@ -1,7 +1,7 @@
 import os
 import torch
 import torch.utils.data
-import torch.distributed
+# import torch.distributed
 import torch.backends.cudnn
 
 

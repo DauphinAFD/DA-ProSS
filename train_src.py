@@ -8,7 +8,7 @@ import numpy as np
 from collections import OrderedDict
 
 import torch
-import torch.distributed
+# import torch.distributed
 import torch.utils.data
 import torch.backends.cudnn
 import torch.nn.functional as F
@@ -352,13 +352,14 @@ def main():
     )
 
     args = parser.parse_args()
-    args.local_rank =  int(os.environ["LOCAL_RANK"])
+    # args.local_rank =  int(os.environ["LOCAL_RANK"])
+    args.local_rank =  0
 
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
 
-    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
-    args.distributed = num_gpus > 1
+    num_gpus = 1 #int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    args.distributed = False #num_gpus > 1
 
     if args.distributed:
         torch.cuda.set_device(args.local_rank)

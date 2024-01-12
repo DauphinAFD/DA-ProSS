@@ -7,7 +7,7 @@ import datetime
 import torch
 import torch.nn.functional as F
 import torch.utils.data
-import torch.distributed
+# import torch.distributed
 import torch.backends.cudnn
 
 from core.configs import cfg

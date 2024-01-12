@@ -39,8 +39,8 @@ def setup_logger(name, save_dir, distributed_rank, filename="log.txt", color=Tru
     )
 
     # don't log results for the non-master process
-    if distributed_rank > 0:
-        return logger
+    # if distributed_rank > 0:
+    #     return logger
     ch = logging.StreamHandler(stream=sys.stdout)
     ch.setLevel(logging.DEBUG)
     if color:

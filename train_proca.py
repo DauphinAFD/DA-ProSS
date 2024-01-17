@@ -146,9 +146,9 @@ def train(cfg, local_rank, distributed, logger):
     merged_estimator = prototype_dist_estimator(feature_num=feature_num*2, cfg=cfg)
 
     if cfg.SOLVER.MULTI_LEVEL:
-        out_seg_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, cfg=cfg)
-        out_trans_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, cfg=cfg)
-        out_final_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, cfg=cfg)
+        out_seg_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='S', cfg=cfg)
+        out_trans_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='T', cfg=cfg)
+        out_final_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='F', cfg=cfg)
 
 
     iteration = 0
@@ -274,10 +274,10 @@ def train(cfg, local_rank, distributed, logger):
         src_mask = src_mask.contiguous().view(B * Hs * Ws, )
         assert not src_mask.requires_grad
 
-        _, Af, Hfs, Wfs = src_feats_final.size()
-        final_src_mask = F.interpolate(src_seg_label.unsqueeze(0).float(), size=(Hfs, Wfs), mode='nearest').squeeze(0).long()
-        final_src_mask = final_src_mask.contiguous().view(B * Hfs * Wfs, )
-        assert not final_src_mask.requires_grad
+        # _, Af, Hfs, Wfs = src_feats_final.size()
+        # final_src_mask = F.interpolate(src_seg_label.unsqueeze(0).float(), size=(Hfs, Wfs), mode='nearest').squeeze(0).long()
+        # final_src_mask = final_src_mask.contiguous().view(B * Hfs * Wfs, )
+        # assert not final_src_mask.requires_grad
 
         # target mask: constant threshold -- cfg.SOLVER.THRESHOLD
         _, _, Ht, Wt = tgt_feats_seg.size()
@@ -287,12 +287,12 @@ def train(cfg, local_rank, distributed, logger):
         tgt_mask = tgt_mask.contiguous().view(B * Ht * Wt, )
         assert not tgt_mask.requires_grad
 
-        _, _, Hft, Wft = tgt_feats_final.size()
-        final_tgt_out_maxvalue, final_tgt_mask = torch.max(tgt_out_final_seg, dim=1)
-        for i in range(cfg.MODEL.NUM_CLASSES):
-            final_tgt_mask[(final_tgt_out_maxvalue < cfg.SOLVER.DELTA) * (final_tgt_mask == i)] = 255
-        final_tgt_mask = final_tgt_mask.contiguous().view(B * Hft * Wft, )
-        assert not final_tgt_mask.requires_grad
+        # _, _, Hft, Wft = tgt_feats_final.size()
+        # final_tgt_out_maxvalue, final_tgt_mask = torch.max(tgt_out_final_seg, dim=1)
+        # for i in range(cfg.MODEL.NUM_CLASSES):
+        #     final_tgt_mask[(final_tgt_out_maxvalue < cfg.SOLVER.DELTA) * (final_tgt_mask == i)] = 255
+        # final_tgt_mask = final_tgt_mask.contiguous().view(B * Hft * Wft, )
+        # assert not final_tgt_mask.requires_grad
 
         
         src_feats_seg = src_feats_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, A)
@@ -301,8 +301,8 @@ def train(cfg, local_rank, distributed, logger):
         src_feats_trans = src_feats_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, A)
         tgt_feats_trans = tgt_feats_trans.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, A)
 
-        src_feats_final = src_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Hfs * Wfs, Af)
-        tgt_feats_final = tgt_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Hft * Wft, Af)
+        src_feats_final = src_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, 2*A)
+        tgt_feats_final = tgt_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, 2*A)
 
 
         # Update feature-level prototype statistics
@@ -312,8 +312,8 @@ def train(cfg, local_rank, distributed, logger):
         feat_seg_estimator.update(features=src_feats_seg.detach(), labels=src_mask)
         feat_seg_estimator.update(features=tgt_feats_seg.detach(), labels=tgt_mask)
 
-        merged_estimator.update(features=src_feats_final.detach(), labels=final_src_mask)
-        merged_estimator.update(features=tgt_feats_final.detach(), labels=final_tgt_mask)
+        merged_estimator.update(features=src_feats_final.detach(), labels=src_mask)
+        merged_estimator.update(features=tgt_feats_final.detach(), labels=tgt_mask)
         
 
 
@@ -329,7 +329,7 @@ def train(cfg, local_rank, distributed, logger):
                                   labels=tgt_mask) \
                     + pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
                                   feat=tgt_feats_trans,
-                                  labels=tgt_mask), \
+                                  labels=tgt_mask) \
                     + pcl_criterion(Proto=merged_estimator.Proto.detach(),
                                   feat=tgt_feats_final,
                                   labels=tgt_mask) \

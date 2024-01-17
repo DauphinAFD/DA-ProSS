@@ -24,7 +24,12 @@ class prototype_dist_estimator():
     def init(self, feature_num, resume=""):
         if resume:
             if feature_num == self.cfg.MODEL.NUM_CLASSES:
-                resume = os.path.join(resume, 'prototype_out_dist.pth')
+                if self.ptype == 'S':
+                    resume = os.path.join(resume, 'prototype_out_seg_dist.pth')
+                if self.ptype == 'T':
+                    resume = os.path.join(resume, 'prototype_out_trans_dist.pth')
+                if self.ptype == 'F':
+                    resume = os.path.join(resume, 'prototype_out_final_dist.pth')
             elif feature_num == self.feature_num:
                 if self.ptype == 'S': 
                     resume = os.path.join(resume, 'prototype_seg_dist.pth')

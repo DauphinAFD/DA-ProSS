@@ -122,10 +122,10 @@ def train(cfg, local_rank, distributed, logger):
     tgt_train_sampler = None
 
     src_train_loader = torch.utils.data.DataLoader(src_train_data, batch_size=batch_size,
-                                                   shuffle=(src_train_sampler is None), num_workers=4,
+                                                   shuffle=(src_train_sampler is None), num_workers=0,
                                                    pin_memory=True, sampler=src_train_sampler, drop_last=True)
     tgt_train_loader = torch.utils.data.DataLoader(tgt_train_data, batch_size=batch_size,
-                                                   shuffle=(tgt_train_sampler is None), num_workers=4,
+                                                   shuffle=(tgt_train_sampler is None), num_workers=0,
                                                    pin_memory=True, sampler=tgt_train_sampler, drop_last=True)
 
 
@@ -529,7 +529,7 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
         test_sampler = torch.utils.data.distributed.DistributedSampler(test_data)
     else:
         test_sampler = None
-    test_loader = torch.utils.data.DataLoader(test_data, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False, num_workers=4,
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=cfg.TEST.BATCH_SIZE, shuffle=False, num_workers=0,
                                               pin_memory=True, sampler=test_sampler)
     
     feature_extractor['B'].eval()

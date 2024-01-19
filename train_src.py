@@ -483,12 +483,12 @@ def main():
     )
 
     args = parser.parse_args()
-    # args.local_rank =  int(os.environ["LOCAL_RANK"])
+    args.local_rank =  int(os.environ["LOCAL_RANK"])
 
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
 
-    # num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     args.distributed = False
 
     if args.distributed :
@@ -505,7 +505,7 @@ def main():
     if output_dir:
         mkdir(output_dir)
 
-    args.local_rank = 0
+    # args.local_rank = 0
     logger = setup_logger("SourceOnly", output_dir, args.local_rank)
     logger.info("Using {} GPUs".format(1))
     logger.info(args)

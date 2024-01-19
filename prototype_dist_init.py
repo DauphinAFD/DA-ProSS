@@ -81,7 +81,7 @@ def prototype_dist_init(cfg, logger):
     src_train_loader = torch.utils.data.DataLoader(src_train_data,
                                                    batch_size=cfg.SOLVER.BATCH_SIZE_VAL,
                                                    shuffle=False,
-                                                   num_workers=4,
+                                                   num_workers=0,
                                                    pin_memory=True,
                                                    drop_last=False)
     iteration = 0

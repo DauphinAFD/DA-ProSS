@@ -281,11 +281,23 @@ def train(cfg, local_rank, distributed, logger):
 
         # target mask: constant threshold -- cfg.SOLVER.THRESHOLD
         _, _, Ht, Wt = tgt_feats_seg.size()
-        tgt_out_maxvalue, tgt_mask = torch.max(tgt_out_final_seg, dim=1)
+        tgt_out_maxvalue, tgt_final_mask = torch.max(tgt_out_final_seg, dim=1)
         for i in range(cfg.MODEL.NUM_CLASSES):
-            tgt_mask[(tgt_out_maxvalue < cfg.SOLVER.DELTA) * (tgt_mask == i)] = 255
-        tgt_mask = tgt_mask.contiguous().view(B * Ht * Wt, )
-        assert not tgt_mask.requires_grad
+            tgt_final_mask[(tgt_out_maxvalue < cfg.SOLVER.DELTA) * (tgt_final_mask == i)] = 255
+        tgt_final_mask = tgt_final_mask.contiguous().view(B * Ht * Wt, )
+        assert not tgt_final_mask.requires_grad
+
+        tgt_out_maxvalue, tgt_seg_mask = torch.max(tgt_out_seg, dim=1)
+        for i in range(cfg.MODEL.NUM_CLASSES):
+            tgt_seg_mask[(tgt_out_maxvalue < cfg.SOLVER.DELTA) * (tgt_seg_mask == i)] = 255
+        tgt_seg_mask = tgt_seg_mask.contiguous().view(B * Ht * Wt, )
+        assert not tgt_seg_mask.requires_grad
+
+        tgt_out_maxvalue, tgt_trans_mask = torch.max(tgt_out_trans, dim=1)
+        for i in range(cfg.MODEL.NUM_CLASSES):
+            tgt_trans_mask[(tgt_out_maxvalue < cfg.SOLVER.DELTA) * (tgt_trans_mask == i)] = 255
+        tgt_trans_mask = tgt_trans_mask.contiguous().view(B * Ht * Wt, )
+        assert not tgt_trans_mask.requires_grad
 
         # _, _, Hft, Wft = tgt_feats_final.size()
         # final_tgt_out_maxvalue, final_tgt_mask = torch.max(tgt_out_final_seg, dim=1)
@@ -307,13 +319,13 @@ def train(cfg, local_rank, distributed, logger):
 
         # Update feature-level prototype statistics
         feat_dep_estimator.update(features=src_feats_trans.detach(), labels=src_mask)
-        feat_dep_estimator.update(features=tgt_feats_trans.detach(), labels=tgt_mask)
+        feat_dep_estimator.update(features=tgt_feats_trans.detach(), labels=tgt_trans_mask)
 
         feat_seg_estimator.update(features=src_feats_seg.detach(), labels=src_mask)
-        feat_seg_estimator.update(features=tgt_feats_seg.detach(), labels=tgt_mask)
+        feat_seg_estimator.update(features=tgt_feats_seg.detach(), labels=tgt_seg_mask)
 
         merged_estimator.update(features=src_feats_final.detach(), labels=src_mask)
-        merged_estimator.update(features=tgt_feats_final.detach(), labels=tgt_mask)
+        merged_estimator.update(features=tgt_feats_final.detach(), labels=tgt_final_mask)
         
 
 
@@ -326,13 +338,13 @@ def train(cfg, local_rank, distributed, logger):
                                   labels=src_mask) \
                     + pcl_criterion(Proto=feat_seg_estimator.Proto.detach(),
                                   feat=tgt_feats_seg,
-                                  labels=tgt_mask) \
+                                  labels=tgt_seg_mask) \
                     + pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
                                   feat=tgt_feats_trans,
-                                  labels=tgt_mask) \
+                                  labels=tgt_trans_mask) \
                     + pcl_criterion(Proto=merged_estimator.Proto.detach(),
                                   feat=tgt_feats_final,
-                                  labels=tgt_mask) \
+                                  labels=tgt_final_mask) \
                     + pcl_criterion(Proto=merged_estimator.Proto.detach(),
                                   feat=src_feats_final,
                                   labels=src_mask)
@@ -355,34 +367,35 @@ def train(cfg, local_rank, distributed, logger):
 
             
             # update output-level statistics
-            out_seg_estimator.update(features=tgt_out_seg.detach(), labels=tgt_mask)
+            out_seg_estimator.update(features=tgt_out_seg.detach(), labels=tgt_seg_mask)
             out_seg_estimator.update(features=src_out_seg.detach(), labels=src_mask)
 
-            out_trans_estimator.update(features=tgt_out_trans.detach(), labels=tgt_mask)
+            out_trans_estimator.update(features=tgt_out_trans.detach(), labels=tgt_trans_mask)
             out_trans_estimator.update(features=src_out_trans.detach(), labels=src_mask)
             
-            out_final_estimator.update(features=tgt_out_final_seg.detach(), labels=tgt_mask)
+            out_final_estimator.update(features=tgt_out_final_seg.detach(), labels=tgt_final_mask)
             out_final_estimator.update(features=src_out_final_seg.detach(), labels=src_mask)
 
+            
             # the proposed contrastive loss on prediction map
             loss_out = pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
                                      feat=src_out_seg,
                                      labels=src_mask) \
                        + pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
                                        feat=tgt_out_seg,
-                                       labels=tgt_mask) \
+                                       labels=tgt_seg_mask) \
                        + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
                                      feat=src_out_trans,
                                      labels=src_mask) \
                        + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
                                        feat=tgt_out_trans,
-                                       labels=tgt_mask) \
+                                       labels=tgt_trans_mask) \
                        + pcl_criterion(Proto=out_final_estimator.Proto.detach(),
                                      feat=src_out_final_seg,
                                      labels=src_mask) \
                        + pcl_criterion(Proto=out_final_estimator.Proto.detach(),
                                        feat=tgt_out_final_seg,
-                                       labels=tgt_mask)
+                                       labels=tgt_final_mask)
             
             meters.update(loss_out=loss_out.item())
 

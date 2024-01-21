@@ -37,19 +37,26 @@ def prototype_dist_init(cfg, logger):
     _, backbone_name = cfg.MODEL.NAME.split('_')
     feature_num = 2048 if backbone_name.startswith('resnet') else 1024
 
-    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
-    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, cfg=cfg)
+    feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='S', cfg=cfg)
+    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='D', cfg=cfg)
     merged_estimator = prototype_dist_estimator(feature_num=feature_num*2, cfg=cfg)
 
-    out_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, cfg=cfg)
+    out_seg_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='S', cfg=cfg)
+    out_trans_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='T', cfg=cfg)
+    out_final_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='F', cfg=cfg)
+    
 
     device = torch.device(cfg.MODEL.DEVICE)
 
     NUM_CLASSES = {"S": 16, "D": 1}
     TASKNAMES = ["S", "D"]
     
-    feature_extractor = build_feature_extractor(cfg)
-    feature_extractor.to(device)
+    feature_extractor = build_feature_extractor(cfg, TASKNAMES)
+    feature_extractor['B'].to(device)
+    feature_extractor['S'].to(device)
+    feature_extractor['D'].to(device)
+    feature_extractor['T'].to(device)
+    feature_extractor['FS'].to(device)
 
     classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
     classifier['S'].to(device)
@@ -74,12 +81,21 @@ def prototype_dist_init(cfg, logger):
     src_train_loader = torch.utils.data.DataLoader(src_train_data,
                                                    batch_size=cfg.SOLVER.BATCH_SIZE_VAL,
                                                    shuffle=False,
-                                                   num_workers=4,
+                                                   num_workers=0,
                                                    pin_memory=True,
                                                    drop_last=False)
     iteration = 0
-    feature_extractor.eval()
-    classifier.eval()
+
+    feature_extractor['B'].eval()
+    feature_extractor['D'].eval()
+    feature_extractor['S'].eval()
+    feature_extractor['T'].eval()
+    feature_extractor['FS'].eval()
+    classifier['S'].eval()
+    classifier['D'].eval()
+    classifier['T'].eval()
+    classifier['FS'].eval()
+
     end = time.time()
     start_time = time.time()
     max_iters = len(src_train_loader)
@@ -97,14 +113,20 @@ def prototype_dist_init(cfg, logger):
 
             size = src_seg_label.shape[-2:]
 
-            src_feats = feature_extractor(src_input)
-            src_feat_trans = src_feats['T']
-            src_feat_seg = src_feats['S']
-            src_feat_final_seg = src_feats['FS']
+            src_feats_back = feature_extractor['B'](src_input)
+            src_feats_seg = feature_extractor['S'](src_feats_back)
+            src_feats_depth = feature_extractor['D'](src_feats_back)
+            src_feats_trans = feature_extractor['T'](src_feats_depth)
+            src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
-            src_out_final_seg = classifier['FS'](src_feat_final_seg, size)
 
-            B, N, Hs, Ws = src_feat_seg.size()
+            # src_out_depth = classifier['D'](src_feats_depth)
+            src_out_seg = classifier['S'](src_feats_seg)
+            src_out_trans = classifier['T'](src_feats_trans)
+            src_out_final_seg = classifier['FS'](src_feats_final) 
+
+            B, N, Hs, Ws = src_feats_seg.size()
+            B, Nf, Hf, Wf = src_feats_final.size()
             _, C, _, _ = src_out_final_seg.size()
 
             # source mask: downsample the ground-truth label
@@ -112,16 +134,20 @@ def prototype_dist_init(cfg, logger):
             src_mask = src_mask.contiguous().view(B * Hs * Ws, )
 
             # feature level
-            src_feat_seg = src_feat_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
-            src_feat_trans = src_feat_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
-            feat_seg_estimator.update(features=src_feat_seg.detach().clone(), labels=src_mask)
-            feat_dep_estimator.update(features=src_feat_trans.detach().clone(), labels=src_mask)
-            merged_estimator.merge_update(proto1=feat_dep_estimator.Proto, 
-                                          proto2=feat_seg_estimator.Proto, 
-                                          amount=feat_dep_estimator.Amount)
+            src_feats_seg = src_feats_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
+            src_feats_trans = src_feats_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
+            src_feats_final = src_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Hf * Wf, Nf)
+            feat_seg_estimator.update(features=src_feats_seg.detach().clone(), labels=src_mask)
+            feat_dep_estimator.update(features=src_feats_trans.detach().clone(), labels=src_mask)
+            merged_estimator.update(features=src_feats_final.detach().clone(), labels=src_mask)
             # output level
-            src_out_final_seg = src_out_final_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, C)
-            out_estimator.update(features=src_out_final_seg.detach().clone(), labels=src_mask)
+            src_out_seg = src_out_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, C)
+            src_out_trans = src_out_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, C)
+            src_out_final_seg = src_out_final_seg.permute(0, 2, 3, 1).contiguous().view(B * Hf * Wf, C)
+            
+            out_seg_estimator.update(features=src_out_seg.detach().clone(), labels=src_mask)
+            out_trans_estimator.update(features=src_out_trans.detach().clone(), labels=src_mask)
+            out_final_estimator.update(features=src_out_final_seg.detach().clone(), labels=src_mask)
 
             batch_time = time.time() - end
             end = time.time()
@@ -152,7 +178,9 @@ def prototype_dist_init(cfg, logger):
                 feat_seg_estimator.save(name='prototype_seg_dist.pth')
                 feat_dep_estimator.save(name='prototype_dep_dist.pth')
                 merged_estimator.save(name='prototype_merged_dist.pth')
-                out_estimator.save(name='prototype_out_dist.pth')
+                out_seg_estimator.save(name='prototype_out_seg_dist.pth')
+                out_trans_estimator.save(name='prototype_out_trans_dist.pth')
+                out_final_estimator.save(name='prototype_out_final_dist.pth')
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=total_time))

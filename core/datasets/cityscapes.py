@@ -187,16 +187,16 @@ class cityscapesDataSet(data.Dataset):
         image = Image.open(datafiles["img"]).convert('RGB')
         label = np.array(Image.open(datafiles["label"]), dtype=np.float32)
         
-        if self.split=="train" :
-            ## Stereo Depth
-            depth = io.loadmat(datafiles["depth"])["depth_map"]
-            depth = np.clip(depth, 0., 655.35)
-            depth[depth<0.1] = 655.35
-            depth = 655.36 / (depth + 0.01)
-            depth = depth.astype(np.float32)
-        else:
+        # if self.split=="train" :
+        #     ## Stereo Depth
+        #     depth = io.loadmat(datafiles["depth"])["depth_map"]
+        #     depth = np.clip(depth, 0., 655.35)
+        #     depth[depth<0.1] = 655.35
+        #     depth = 655.36 / (depth + 0.01)
+        #     depth = depth.astype(np.float32)
+        # else:
             # Dummpy depth not used
-            depth = 0. * np.array(label.copy(), dtype=np.float32)
+        depth = 0. * np.array(label.copy(), dtype=np.float32)
 
 
         name = datafiles["name"]

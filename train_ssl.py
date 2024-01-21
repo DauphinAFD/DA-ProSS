@@ -173,7 +173,7 @@ def train(cfg, local_rank, distributed, logger):
         
         src_input = src_input.cuda(non_blocking=True)
         src_seg_label = src_seg_label.cuda(non_blocking=True).long()
-        src_depth_label = src_depth_label.cuda(non_blocking=True).long()
+        # src_depth_label = src_depth_label.cuda(non_blocking=True).long()
 
         size = src_seg_label.shape[-2:]
         
@@ -183,9 +183,9 @@ def train(cfg, local_rank, distributed, logger):
         src_feats_trans = feature_extractor['T'](src_feats_depth)
         src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
-        pred_seg = classifier['S'](src_feats_seg, size)
-        pred_depth = classifier['D'](src_feats_depth, size)
-        pred_trans = classifier['T'](src_feats_trans, size)
+        # pred_seg = classifier['S'](src_feats_seg, size)
+        # pred_depth = classifier['D'](src_feats_depth, size)
+        # pred_trans = classifier['T'](src_feats_trans, size)
         pred_seg_final = classifier['FS'](src_feats_final, size)
 
 
@@ -229,7 +229,7 @@ def train(cfg, local_rank, distributed, logger):
             )
 
         if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
-            current_mIoU, current_mAcc, current_allAcc = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
+            mIoU_seg, mIoU_trans, mIoU_final = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
             
             feature_extractor['B'].train()
             feature_extractor['D'].train()
@@ -243,12 +243,12 @@ def train(cfg, local_rank, distributed, logger):
 
             if save_to_disk:
                 # update best model
-                if current_mIoU > best_mIoU:
+                if mIoU_final > best_mIoU:
                     filename = os.path.join(output_dir, "model_best.pth")
                     torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
-                    best_mIoU = current_mIoU
+                    best_mIoU = mIoU_final
                     best_iteration = iteration
                 else:
                     filename = os.path.join(output_dir, "model_current.pth")
@@ -256,6 +256,15 @@ def train(cfg, local_rank, distributed, logger):
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
                 logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
+
+            # Wandb Evaluation Log
+            wandb.log({
+                "Current Best mIoU": best_mIoU,
+                "mIoU_seg": mIoU_seg,
+                "mIoU_trans": mIoU_trans,
+                "mIoU_final": mIoU_final,
+            })
+            
             torch.cuda.empty_cache()
 
         if iteration == cfg.SOLVER.MAX_ITER:

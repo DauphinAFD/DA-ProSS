@@ -6,9 +6,10 @@ import torch.backends.cudnn
 
 
 class prototype_dist_estimator():
-    def __init__(self, feature_num, cfg, is_merged = False):
+    def __init__(self, feature_num, cfg, ptype='', is_merged = False):
         super(prototype_dist_estimator, self).__init__()
 
+        self.ptype = ptype
         self.cfg = cfg
         self.class_num = cfg.MODEL.NUM_CLASSES
         _, backbone_name = cfg.MODEL.NAME.split('_')
@@ -23,9 +24,21 @@ class prototype_dist_estimator():
     def init(self, feature_num, resume=""):
         if resume:
             if feature_num == self.cfg.MODEL.NUM_CLASSES:
-                resume = os.path.join(resume, 'prototype_out_dist.pth')
+                if self.ptype == 'S':
+                    resume = os.path.join(resume, 'prototype_out_seg_dist.pth')
+                if self.ptype == 'T':
+                    resume = os.path.join(resume, 'prototype_out_trans_dist.pth')
+                if self.ptype == 'F':
+                    resume = os.path.join(resume, 'prototype_out_final_dist.pth')
             elif feature_num == self.feature_num:
-                resume = os.path.join(resume, 'prototype_feat_dist.pth')
+                if self.ptype == 'S': 
+                    resume = os.path.join(resume, 'prototype_seg_dist.pth')
+                elif self.ptype == 'D': 
+                    resume = os.path.join(resume, 'prototype_dep_dist.pth')
+                else:
+                    raise RuntimeError("Prototype type not available: {}".format(self.ptype))
+            elif feature_num == self.feature_num*2:
+                resume = os.path.join(resume, 'prototype_merged_dist.pth')
             else:
                 raise RuntimeError("Feature_num not available: {}".format(feature_num))
             print("Loading checkpoint from {}".format(resume))

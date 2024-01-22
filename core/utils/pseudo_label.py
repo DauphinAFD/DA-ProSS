@@ -23,7 +23,6 @@ class PseudoLabel:
         prob, label = torch.max(input, dim=1)
         prob_np = prob.cpu().numpy()
         label_np = label.cpu().numpy()
-        print(self.iter)
         if self.iter==0:
             self.prob_tar = prob_np
             self.label_tar = label_np
@@ -39,7 +38,7 @@ class PseudoLabel:
                 self.thres.append(0)
                 continue
             x = np.sort(x)
-            self.thres.append(x[np.int(np.round(len(x) * percent))])
+            self.thres.append(x[int(np.round(len(x) * percent))])
         self.thres = np.array(self.thres)
         self.thres[self.thres > thred] = thred
         return self.thres

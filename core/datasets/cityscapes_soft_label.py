@@ -145,6 +145,7 @@ class cityscapesSoftLabelDataSet(data.Dataset):
         image = Image.open(datafiles["img"]).convert('RGB')
         label = np.array(Image.open(datafiles["label"]), dtype=np.float32)
         name = datafiles["name"]
+        depth = np.array(label.copy(), dtype=np.float32)
 
         # re-assign labels to match the format of Cityscapes
         label_copy = self.ignore_label * np.ones(label.shape, dtype=np.float32)
@@ -153,5 +154,5 @@ class cityscapesSoftLabelDataSet(data.Dataset):
         label = Image.fromarray(label_copy)
 
         if self.transform is not None:
-            image, label = self.transform(image, label)
-        return image, label, name
+            image, label, depth = self.transform(image, label, depth)
+        return image, label, depth, name

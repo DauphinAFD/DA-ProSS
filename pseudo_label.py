@@ -32,7 +32,12 @@ def inference(feature_extractor, classifier, image, label, flip=True):
     if flip:
         image = torch.cat([image, torch.flip(image, [3])], 0)
     with torch.no_grad():
-        output = classifier(feature_extractor(image))
+        tgt_feats_back = feature_extractor['B'](image)
+        tgt_feats_seg = feature_extractor['S'](tgt_feats_back)
+        tgt_feats_depth = feature_extractor['D'](tgt_feats_back)
+        tgt_feats_trans = feature_extractor['T'](tgt_feats_depth)
+        tgt_feats_final = feature_extractor['FS'](tgt_feats_seg, tgt_feats_trans)
+        output = classifier(tgt_feats_final)
     output = F.interpolate(output, size=size, mode='bilinear', align_corners=True)
     output = F.softmax(output, dim=1)
     if flip:
@@ -70,12 +75,17 @@ def transform_color(pred):
 def get_threshold(cfg):
     logger = logging.getLogger("pseudo_label.trainer")
     logger.info("Start inference on target dataset and get threshold of each class")
-
+    NUM_CLASSES = {"S": 16, "D": 1}
+    TASKNAMES = ["S", "D"]
     device = torch.device(cfg.MODEL.DEVICE)
-    feature_extractor = build_feature_extractor(cfg)
+    feature_extractor = build_feature_extractor(cfg, TASKNAMES)
+    feature_extractor['B'].to(device)
+    feature_extractor['S'].to(device)
+    feature_extractor['D'].to(device)
+    feature_extractor['T'].to(device)
     feature_extractor['FS'].to(device)
 
-    classifier = build_classifier(cfg)
+    classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
     classifier['FS'].to(device)
 
     if cfg.resume:
@@ -86,6 +96,10 @@ def get_threshold(cfg):
         classifier_weights = strip_prefix_if_present(checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
 
+    feature_extractor['B'].eval()
+    feature_extractor['S'].eval()
+    feature_extractor['D'].eval()
+    feature_extractor['T'].eval()
     feature_extractor['FS'].eval()
     classifier['FS'].eval()
 
@@ -101,11 +115,17 @@ def get_threshold(cfg):
 
     cpseudo_label = PseudoLabel(cfg)
     for batch in tqdm(tgt_train_loader):
-        x, _, name = batch
+        x, _,_, name = batch
         tgt_input = x.cuda(non_blocking=True)
         tgt_size = tgt_input.shape[-2:]
         with torch.no_grad():
-            output = classifier['FS'](feature_extractor['FS'](tgt_input))
+            tgt_feats_back = feature_extractor['B'](tgt_input)
+            tgt_feats_seg = feature_extractor['S'](tgt_feats_back)
+            tgt_feats_depth = feature_extractor['D'](tgt_feats_back)
+            tgt_feats_trans = feature_extractor['T'](tgt_feats_depth)
+            tgt_feats_final = feature_extractor['FS'](tgt_feats_seg, tgt_feats_trans)
+
+            output = classifier['FS'](tgt_feats_final)
         output = F.interpolate(output, size=tgt_size, mode='bilinear', align_corners=True)
         cpseudo_label.update_pseudo_label(output)
     thres_const = cpseudo_label.get_threshold_const(thred=0.9, percent=cfg.MODEL.THRESHOLD_PERCENT)
@@ -117,12 +137,18 @@ def get_threshold(cfg):
 def test(cfg, thres_const):
     logger = logging.getLogger("pseudo_label.tester")
     logger.info("Start testing")
+    NUM_CLASSES = {"S": 16, "D": 1}
+    TASKNAMES = ["S", "D"]
     device = torch.device(cfg.MODEL.DEVICE)
 
-    feature_extractor = build_feature_extractor(cfg)
+    feature_extractor = build_feature_extractor(cfg, TASKNAMES)
+    feature_extractor['B'].to(device)
+    feature_extractor['S'].to(device)
+    feature_extractor['D'].to(device)
+    feature_extractor['T'].to(device)
     feature_extractor['FS'].to(device)
 
-    classifier = build_classifier(cfg)
+    classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
     classifier['FS'].to(device)
 
     if cfg.resume:
@@ -133,6 +159,10 @@ def test(cfg, thres_const):
         classifier_weights = strip_prefix_if_present(checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
 
+    feature_extractor['B'].eval()
+    feature_extractor['S'].eval()
+    feature_extractor['D'].eval()
+    feature_extractor['T'].eval()
     feature_extractor['FS'].eval()
     classifier['FS'].eval()
 
@@ -160,11 +190,11 @@ def test(cfg, thres_const):
         if index % 100 == 0:
             logger.info("{} processed".format(index))
 
-        x, y, name = batch
+        x, y, _, name = batch
         x = x.cuda(non_blocking=True)
         y = y.cuda(non_blocking=True).long()
 
-        pred = inference(feature_extractor['FS'], classifier['FS'], x, y, flip=False)
+        pred = inference(feature_extractor, classifier['FS'], x, y, flip=False)
 
         output = pred.max(1)[1]
         intersection, union, target = intersectionAndUnionGPU(output, y, cfg.MODEL.NUM_CLASSES, cfg.INPUT.IGNORE_LABEL)
@@ -179,9 +209,8 @@ def test(cfg, thres_const):
         pred_label = pred.argmax(0)
         for i in range(cfg.MODEL.NUM_CLASSES):
             pred_label[(pred_max < thres_const[i]) * (pred_label == i)] = 255
-        import pdb;pdb.set_trace()
         mask = get_color_pallete(pred_label, "city")
-        mask_filename = name[0] if len(name[0].split("/")) < 2 else name[0].split("/")[1]
+        mask_filename = name[0] if len(name[0].split("/")) < 2 else name[0].split("/")[-1]
         mask.save(os.path.join(output_folder, mask_filename))
 
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)

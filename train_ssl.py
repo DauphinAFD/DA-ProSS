@@ -154,7 +154,7 @@ def train(cfg, local_rank, distributed, logger):
     best_mIoU = 0
     best_iteration = 0
 
-    for i, (src_input, src_label, src_depth_label, _) in enumerate(train_loader):
+    for i, (src_input, src_label, _, _) in enumerate(train_loader):
         data_time = time.time() - end
 
         optimizer_fea.zero_grad()
@@ -172,10 +172,10 @@ def train(cfg, local_rank, distributed, logger):
 
         
         src_input = src_input.cuda(non_blocking=True)
-        src_seg_label = src_seg_label.cuda(non_blocking=True).long()
+        src_label = src_label.cuda(non_blocking=True).long()
         # src_depth_label = src_depth_label.cuda(non_blocking=True).long()
 
-        size = src_seg_label.shape[-2:]
+        size = src_label.shape[-2:]
         
         src_feats_back = feature_extractor['B'](src_input)
         src_feats_seg = feature_extractor['S'](src_feats_back)

@@ -83,15 +83,15 @@ class TransferBlock(nn.Module):
     def __init__(self, input_channels, intermediate_channels, stride=1, dilation=1, downsample=None):
         super(TransferBlock, self).__init__()
         self.stride = stride
-        self.conv1 = nn.Conv2d(input_channels, intermediate_channels // 2, kernel_size=3, bias=False) # change
+        self.conv1 = nn.Conv2d(input_channels, intermediate_channels // 2, kernel_size=3, padding='same',bias=False) # change
         self.bn1 = nn.BatchNorm2d(intermediate_channels // 2,affine = affine_par)
 
         padding = dilation
         self.conv2 = nn.Conv2d(intermediate_channels// 2, intermediate_channels // 2, kernel_size=3, stride=1, # change
-                               padding=padding, bias=False, dilation = dilation)
+                               padding='same', bias=False, dilation = dilation)
         self.bn2 = nn.BatchNorm2d(intermediate_channels // 2,affine = affine_par)
 
-        self.conv3 = nn.Conv2d(intermediate_channels // 2, intermediate_channels ,stride = self.stride, kernel_size=3, bias=False)
+        self.conv3 = nn.Conv2d(intermediate_channels // 2, intermediate_channels, padding=1, stride = self.stride, kernel_size=3, bias=False)
         self.bn3 = nn.BatchNorm2d(intermediate_channels, affine = affine_par)
         self.relu = nn.ReLU(inplace=True)
 
@@ -248,9 +248,9 @@ class Transfer(nn.Module):
         layers.append(TransferBlock(input_channels, input_channels * 4, stride = 2, downsample = None))
         layers.append(TransferBlock(input_channels * 4, input_channels * 16, stride = 2, downsample = None))
         layers.append(TransferBlock(input_channels * 16, input_channels * 64, stride = 2, downsample = None))
-        layers.append(TransferBlock(input_channels * 64, input_channels * 256, stride = 1, downsample = None))
-        layers.append(TransferBlock(input_channels * 256, input_channels * 1024, stride = 1, downsample = None))
-        layers.append(TransferBlock(intermediate_channels * 1024, intermediate_channels, downsample = None))
+        layers.append(TransferBlock(input_channels * 64, input_channels * 512, stride = 1, downsample = None))
+        layers.append(TransferBlock(input_channels * 512, input_channels * 2048, stride = 1, downsample = None))
+        # layers.append(TransferBlock(intermediate_channels * 1024, intermediate_channels, downsample = None))
         self.transfer = nn.Sequential(*layers)
         # self.conv_out = nn.Conv2d(intermediate_channels, NUM_OUTPUT['S'], 1)
 

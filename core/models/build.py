@@ -23,7 +23,7 @@ def build_feature_extractor(cfg, TASKNAMES):
                                             pretrained_backbone=True, freeze_bn=cfg.MODEL.FREEZE_BN)
         for task in TASKNAMES:
             heads[task] = TaskPredictionModule(auxilary_tasks, channels)
-        heads['T'] = Transfer(channels)
+        heads['T'] = Transfer(1)
         heads['FS'] = FinalPredictionModule(channels)
         feature = nn.ModuleDict(heads)
     

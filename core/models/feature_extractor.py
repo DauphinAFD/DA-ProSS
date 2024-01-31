@@ -82,17 +82,18 @@ class TransferBlock(nn.Module):
 
     def __init__(self, input_channels, intermediate_channels, stride=1, dilation=1, downsample=None):
         super(TransferBlock, self).__init__()
-        self.conv1 = nn.Conv2d(input_channels, intermediate_channels, kernel_size=1, stride=stride, bias=False) # change
-        self.bn1 = nn.BatchNorm2d(intermediate_channels,affine = affine_par)
+        self.stride = stride
+        self.conv1 = nn.Conv2d(input_channels, intermediate_channels // 2, kernel_size=3, bias=False) # change
+        self.bn1 = nn.BatchNorm2d(intermediate_channels // 2,affine = affine_par)
 
         padding = dilation
-        self.conv2 = nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size=3, stride=1, # change
+        self.conv2 = nn.Conv2d(intermediate_channels// 2, intermediate_channels // 2, kernel_size=3, stride=1, # change
                                padding=padding, bias=False, dilation = dilation)
-        self.bn2 = nn.BatchNorm2d(intermediate_channels,affine = affine_par)
-        self.conv3 = nn.Conv2d(intermediate_channels, intermediate_channels * 4, kernel_size=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(intermediate_channels * 4, affine = affine_par)
+        self.bn2 = nn.BatchNorm2d(intermediate_channels // 2,affine = affine_par)
+
+        self.conv3 = nn.Conv2d(intermediate_channels // 2, intermediate_channels ,stride = self.stride, kernel_size=3, bias=False)
+        self.bn3 = nn.BatchNorm2d(intermediate_channels, affine = affine_par)
         self.relu = nn.ReLU(inplace=True)
-        self.stride = stride
 
 
     def forward(self, x):
@@ -110,9 +111,6 @@ class TransferBlock(nn.Module):
         out = self.relu(out)
 
         return out
-
-
-
 
 class resnet_feature_extractor(nn.Module):
     def __init__(self, backbone_name, pretrained_weights=None, aux=False, pretrained_backbone=True, freeze_bn=False):
@@ -243,19 +241,16 @@ class TaskPredictionModule(nn.Module):
         return out 
 
 class Transfer(nn.Module):
-    def __init__(self, input_channels = 2048, intermediate_channels = 2048, stride=1, dilation=1, num_blocks=5):
+    def __init__(self, input_channels = 1, intermediate_channels = 2048, stride=1, dilation=1, num_blocks=5):
         super(Transfer, self).__init__()
         layers = []
 
-        if input_channels != intermediate_channels:
-                downsample = nn.Sequential(nn.Conv2d(input_channels, intermediate_channels, kernel_size=1,
-                                                    stride=1, bias=False), nn.BatchNorm2d(intermediate_channels))
-        else:
-            downsample = None
-        layers.append(TransferBlock(input_channels, intermediate_channels//4, downsample = downsample))
-        for i in range(num_blocks-2):
-            layers.append(TransferBlock(intermediate_channels, intermediate_channels//4, downsample = None))
-        layers.append(TransferBlock(intermediate_channels, intermediate_channels//4, downsample = None))
+        layers.append(TransferBlock(input_channels, input_channels * 4, stride = 2, downsample = None))
+        layers.append(TransferBlock(input_channels * 4, input_channels * 16, stride = 2, downsample = None))
+        layers.append(TransferBlock(input_channels * 16, input_channels * 64, stride = 2, downsample = None))
+        layers.append(TransferBlock(input_channels * 64, input_channels * 256, stride = 1, downsample = None))
+        layers.append(TransferBlock(input_channels * 256, input_channels * 1024, stride = 1, downsample = None))
+        layers.append(TransferBlock(intermediate_channels * 1024, intermediate_channels, downsample = None))
         self.transfer = nn.Sequential(*layers)
         # self.conv_out = nn.Conv2d(intermediate_channels, NUM_OUTPUT['S'], 1)
 

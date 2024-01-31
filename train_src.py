@@ -201,11 +201,14 @@ def train(cfg, local_rank, distributed, logger):
         src_feats_back = feature_extractor['B'](src_input)
         src_feats_seg = feature_extractor['S'](src_feats_back)
         src_feats_depth = feature_extractor['D'](src_feats_back)
-        src_feats_trans = feature_extractor['T'](src_feats_depth)
+
+        pred_depth = classifier['D'](src_feats_depth, size)
+
+        src_feats_trans = feature_extractor['T'](pred_depth) # src_feats_trans = feature_extractor['T'](src_feats_depth)
         src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
         pred_seg = classifier['S'](src_feats_seg, size)
-        pred_depth = classifier['D'](src_feats_depth, size)
+        # pred_depth = classifier['D'](src_feats_depth, size)
         pred_trans = classifier['T'](src_feats_trans, size)
         pred_seg_final = classifier['FS'](src_feats_final, size)
 

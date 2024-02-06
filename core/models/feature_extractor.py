@@ -77,40 +77,6 @@ class BottleneckPad(nn.Module):
 
         return out
 
-class TransferBlock(nn.Module):
-    expansion = 4
-
-    def __init__(self, input_channels, intermediate_channels, stride=1, dilation=1, downsample=None):
-        super(TransferBlock, self).__init__()
-        self.stride = stride
-        self.conv1 = nn.Conv2d(input_channels, intermediate_channels // 2, kernel_size=3, padding='same',bias=False) # change
-        self.bn1 = nn.BatchNorm2d(intermediate_channels // 2,affine = affine_par)
-
-        padding = dilation
-        self.conv2 = nn.Conv2d(intermediate_channels// 2, intermediate_channels // 2, kernel_size=3, stride=1, # change
-                               padding='same', bias=False, dilation = dilation)
-        self.bn2 = nn.BatchNorm2d(intermediate_channels // 2,affine = affine_par)
-
-        self.conv3 = nn.Conv2d(intermediate_channels // 2, intermediate_channels, padding=1, stride = self.stride, kernel_size=3, bias=False)
-        self.bn3 = nn.BatchNorm2d(intermediate_channels, affine = affine_par)
-        self.relu = nn.ReLU(inplace=True)
-
-
-    def forward(self, x):
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out = self.relu(out)
-
-        out = self.conv3(out)
-        out = self.bn3(out)
-        out = self.relu(out)
-
-        return out
 
 class resnet_feature_extractor(nn.Module):
     def __init__(self, backbone_name, pretrained_weights=None, aux=False, pretrained_backbone=True, freeze_bn=False):
@@ -127,31 +93,13 @@ class resnet_feature_extractor(nn.Module):
             return_layers['layer3'] = 'aux'
         self.backbone = IntermediateLayerGetter(backbone, return_layers=return_layers)
         
-        # self.tasks = TASKNAMES
-        # self.auxilary_tasks = TASKNAMES
-        # self.channels = 2048
-        # # Task-specific heads for initial prediction
-        # self.task_prediction_heads = TaskPredictionModule(self.auxilary_tasks, self.channels)
-        # self.transfer = Transfer(self.channels )
-        # self.final_prediction = FinalPredictionModule(self.channels)
         
     def forward(self, x):
         out = self.backbone(x)['out']
-        # out = self.task_prediction_heads(out)
-        # out1 = self.transfer(out['D'])
-        # output = {}
-        # output['T'] = out1
-        # for task in self.auxilary_tasks:
-        #     output[task] = out[task]
-        # #
-        # output['FS'] =  self.final_prediction(output)
         return out
 
     def optim_parameters(self, learning_rate):
         return [{'params': self.backbone.parameters(), 'lr': learning_rate}]
-                # {'params': self.task_prediction_heads.parameters(), 'lr': 10*learning_rate},
-                # {'params': self.transfer.parameters(), 'lr': 10*learning_rate},
-                # {'params': self.final_prediction.parameters(), 'lr': 10*learning_rate}]
     
     def optim_depth_parameters(self, learning_rate):
         return [{'params': self.backbone.parameters(), 'lr': learning_rate},
@@ -182,41 +130,7 @@ class resnet_feature_extractor_v2(nn.Module):
             for m in self.modules():
                 if isinstance(m, resnet_feature_extractor_v2._batchnorm):
                     m.eval()
-
-# class TaskPredictionModule(nn.Module):
-#     """
-#         Make the initial task predictions from the backbone features.
-#     """
-#     def __init__(self, tasks, input_channels, intermediate_channels=2048):
-#         super(TaskPredictionModule, self).__init__() 
-#         self.tasks = tasks 
-#         layers = {}
-#         # conv_out = {}
-        
-#         for task in self.tasks:
-#             if input_channels != intermediate_channels:
-#                 downsample = nn.Sequential(nn.Conv2d(input_channels, intermediate_channels, kernel_size=1,
-#                                                     stride=1, bias=False), nn.BatchNorm2d(intermediate_channels))
-#             else:
-#                 downsample = None
-#             bottleneck1 = BottleneckPad(input_channels, intermediate_channels//4, downsample=downsample)
-#             bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
-#             # conv_out_ = nn.Conv2d(intermediate_channels, NUM_OUTPUT[task], 1)
-#             layers[task] = nn.Sequential(bottleneck1, bottleneck2)
-#             # conv_out[task] = conv_out_
-        
-#         self.layers = nn.ModuleDict(layers)
-#         # self.conv_out = nn.ModuleDict(conv_out)
-
-
-#     def forward(self, x):
-#         out = {}
-#         for task in self.tasks:
-#             out[task] = self.layers[task](x)
-#             # out[task] = self.conv_out[task](out[task])
-
-#         return out 
-                    
+     
 class TaskPredictionModule(nn.Module):
     """
         Make the initial task predictions from the backbone features.
@@ -240,19 +154,36 @@ class TaskPredictionModule(nn.Module):
 
         return out 
 
+
+class TransferBlock(nn.Module):
+    expansion = 4
+
+    def __init__(self, input_channels, output_channels, kernel,stride, padding):
+        super(TransferBlock, self).__init__()
+        self.stride = stride
+        self.conv = nn.Conv2d(input_channels,output_channels, kernel_size=kernel, stride=1, padding=padding,bias=True) # change
+        self.bn = nn.BatchNorm2d(output_channels)
+        self.rel = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+
+        out = self.conv(x)
+        out = self.bn(out)
+        out = self.rel(out)
+
+        return out
+ 
+
 class Transfer(nn.Module):
-    def __init__(self, input_channels = 1, intermediate_channels = 2048, stride=1, dilation=1, num_blocks=5):
+    def __init__(self, input_channels = 1, output_channels = 2048, stride=1, dilation=1, num_blocks=5):
         super(Transfer, self).__init__()
         layers = []
 
-        layers.append(TransferBlock(input_channels, input_channels * 4, stride = 2, downsample = None))
-        layers.append(TransferBlock(input_channels * 4, input_channels * 16, stride = 2, downsample = None))
-        layers.append(TransferBlock(input_channels * 16, input_channels * 64, stride = 2, downsample = None))
-        layers.append(TransferBlock(input_channels * 64, input_channels * 512, stride = 1, downsample = None))
-        layers.append(TransferBlock(input_channels * 512, input_channels * 2048, stride = 1, downsample = None))
-        # layers.append(TransferBlock(intermediate_channels * 1024, intermediate_channels, downsample = None))
+        layers.append(TransferBlock(input_channels, 128, kernel=1, stride=1, padding=0))
+        layers.append(TransferBlock(128, 512, kernel=1, stride=1, padding=0))
+        layers.append(TransferBlock(512, 512, kernel=3, stride=1, padding=1))
+        layers.append(TransferBlock(512, output_channels, kernel=1, stride=1, padding=0))
         self.transfer = nn.Sequential(*layers)
-        # self.conv_out = nn.Conv2d(intermediate_channels, NUM_OUTPUT['S'], 1)
 
     def forward(self, x):
         out = self.transfer(x)
@@ -260,18 +191,25 @@ class Transfer(nn.Module):
         return out
 
 
-# class SABlock(nn.Module):
-#     """ Spatial self-attention block """
-#     def __init__(self, in_channels, out_channels):
-#         super(SABlock, self).__init__()
-#         self.attention = nn.Sequential(nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
-#                                         nn.ReLU(inplace=True))
-#         self.conv = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
+# class Transfer(nn.Module):
+#     def __init__(self, input_channels = 1, intermediate_channels = 2048, stride=1, dilation=1, num_blocks=5):
+#         super(Transfer, self).__init__()
+#         layers = []
+
+#         layers.append(TransferBlock(input_channels, input_channels * 4, stride = 2, downsample = None))
+#         layers.append(TransferBlock(input_channels * 4, input_channels * 16, stride = 2, downsample = None))
+#         layers.append(TransferBlock(input_channels * 16, input_channels * 64, stride = 2, downsample = None))
+#         layers.append(TransferBlock(input_channels * 64, input_channels * 512, stride = 1, downsample = None))
+#         layers.append(TransferBlock(input_channels * 512, input_channels * 2048, stride = 1, downsample = None))
+#         # layers.append(TransferBlock(intermediate_channels * 1024, intermediate_channels, downsample = None))
+#         self.transfer = nn.Sequential(*layers)
+#         # self.conv_out = nn.Conv2d(intermediate_channels, NUM_OUTPUT['S'], 1)
 
 #     def forward(self, x):
-#         attention_mask = self.attention(x)
-#         features = self.conv(x)
-#         return torch.mul(features, attention_mask)
+#         out = self.transfer(x)
+#         # out = self.conv_out(out)
+#         return out
+
 
 class FinalPredictionModule(nn.Module):
     """

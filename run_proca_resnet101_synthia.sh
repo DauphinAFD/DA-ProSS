@@ -1,7 +1,7 @@
 ########### ResNet-101 synthia -> cityscapes
 NGPUS=1
 # train on depth data
-# torchrun --nproc_per_node=$NGPUS train_depth.py -cfg configs/synthia/deeplabv2_r101_src.yaml SOLVER.LAMBDA_LOV 0.75 OUTPUT_DIR results/synthia/r101_g2c_depth SOLVER.BATCH_SIZE 4
+# torchrun --nproc_per_node=$NGPUS train_src.py -cfg configs/synthia/deeplabv2_r101_src.yaml SOLVER.LAMBDA_LOV 0.75 OUTPUT_DIR results/synthia/r101_g2c_depth SOLVER.BATCH_SIZE 2
 
 # train on source data
 #  torchrun --nproc_per_node=$NGPUS train_src.py -cfg configs/synthia/deeplabv2_r101_src.yaml SOLVER.LAMBDA_LOV 0.75 OUTPUT_DIR results/synthia/r101_g2c_src SOLVER.BATCH_SIZE 2

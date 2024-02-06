@@ -395,7 +395,10 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
             src_feats_back = feature_extractor['B'](x)
             src_feats_seg = feature_extractor['S'](src_feats_back)
             src_feats_depth = feature_extractor['D'](src_feats_back)
-            src_feats_trans = feature_extractor['T'](src_feats_depth)
+    
+            output_depth = classifier['D'](src_feats_depth, (512, 1024))
+    
+            src_feats_trans = feature_extractor['T'](output_depth)
             src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
             output_seg = classifier['S'](src_feats_seg)

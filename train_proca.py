@@ -212,10 +212,12 @@ def train(cfg, local_rank, distributed, logger):
         src_feats_back = feature_extractor['B'](src_input)
         src_feats_seg = feature_extractor['S'](src_feats_back)
         src_feats_depth = feature_extractor['D'](src_feats_back)
-        src_feats_trans = feature_extractor['T'](src_feats_depth)
+
+        src_out_depth = classifier['D'](src_feats_depth, src_size)
+
+        src_feats_trans = feature_extractor['T'](src_out_depth)
         src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
-        src_out_depth = classifier['D'](src_feats_depth)
         src_out_seg = classifier['S'](src_feats_seg)
         src_out_trans = classifier['T'](src_feats_trans)
         src_out_final_seg = classifier['FS'](src_feats_final) 
@@ -225,10 +227,12 @@ def train(cfg, local_rank, distributed, logger):
         tgt_feats_back = feature_extractor['B'](tgt_input)
         tgt_feats_seg = feature_extractor['S'](tgt_feats_back)
         tgt_feats_depth = feature_extractor['D'](tgt_feats_back)
-        tgt_feats_trans = feature_extractor['T'](tgt_feats_depth)
+
+        tgt_out_depth = classifier['D'](tgt_feats_depth, tgt_size)
+
+        tgt_feats_trans = feature_extractor['T'](tgt_out_depth)
         tgt_feats_final = feature_extractor['FS'](tgt_feats_seg, tgt_feats_trans)
 
-        tgt_out_depth = classifier['D'](tgt_feats_depth)
         tgt_out_seg = classifier['S'](tgt_feats_seg)
         tgt_out_trans = classifier['T'](tgt_feats_trans)
         tgt_out_final_seg = classifier['FS'](tgt_feats_final)
@@ -313,8 +317,8 @@ def train(cfg, local_rank, distributed, logger):
         src_feats_trans = src_feats_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, A)
         tgt_feats_trans = tgt_feats_trans.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, A)
 
-        src_feats_final = src_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, 2*A)
-        tgt_feats_final = tgt_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, 2*A)
+        # src_feats_final = src_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, 2*A)
+        # tgt_feats_final = tgt_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, 2*A)
 
 
         # Update feature-level prototype statistics
@@ -324,8 +328,8 @@ def train(cfg, local_rank, distributed, logger):
         feat_seg_estimator.update(features=src_feats_seg.detach(), labels=src_mask)
         feat_seg_estimator.update(features=tgt_feats_seg.detach(), labels=tgt_seg_mask)
 
-        merged_estimator.update(features=src_feats_final.detach(), labels=src_mask)
-        merged_estimator.update(features=tgt_feats_final.detach(), labels=tgt_final_mask)
+        # merged_estimator.update(features=src_feats_final.detach(), labels=src_mask)
+        # merged_estimator.update(features=tgt_feats_final.detach(), labels=tgt_final_mask)
         
 
 
@@ -341,13 +345,13 @@ def train(cfg, local_rank, distributed, logger):
                                   labels=tgt_seg_mask) \
                     + pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
                                   feat=tgt_feats_trans,
-                                  labels=tgt_trans_mask) \
-                    + pcl_criterion(Proto=merged_estimator.Proto.detach(),
-                                  feat=tgt_feats_final,
-                                  labels=tgt_final_mask) \
-                    + pcl_criterion(Proto=merged_estimator.Proto.detach(),
-                                  feat=src_feats_final,
-                                  labels=src_mask)
+                                  labels=tgt_trans_mask) 
+                    # + pcl_criterion(Proto=merged_estimator.Proto.detach(),
+                    #               feat=tgt_feats_final,
+                    #               labels=tgt_final_mask) \
+                    # + pcl_criterion(Proto=merged_estimator.Proto.detach(),
+                    #               feat=src_feats_final,
+                    #               labels=src_mask)
         meters.update(loss_feat=loss_feat.item())       # Logger
 
         
@@ -367,10 +371,10 @@ def train(cfg, local_rank, distributed, logger):
 
             
             # update output-level statistics
-            out_seg_estimator.update(features=tgt_out_seg.detach(), labels=tgt_seg_mask)
-            out_seg_estimator.update(features=src_out_seg.detach(), labels=src_mask)
+            # out_seg_estimator.update(features=tgt_out_seg.detach(), labels=tgt_seg_mask)
+            # out_seg_estimator.update(features=src_out_seg.detach(), labels=src_mask)
 
-            out_trans_estimator.update(features=tgt_out_trans.detach(), labels=tgt_trans_mask)
+            # out_trans_estimator.update(features=tgt_out_trans.detach(), labels=tgt_trans_mask)
             out_trans_estimator.update(features=src_out_trans.detach(), labels=src_mask)
             
             out_final_estimator.update(features=tgt_out_final_seg.detach(), labels=tgt_final_mask)
@@ -378,19 +382,19 @@ def train(cfg, local_rank, distributed, logger):
 
             
             # the proposed contrastive loss on prediction map
-            loss_out = pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
-                                     feat=src_out_seg,
-                                     labels=src_mask) \
-                       + pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
-                                       feat=tgt_out_seg,
-                                       labels=tgt_seg_mask) \
-                       + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
-                                     feat=src_out_trans,
-                                     labels=src_mask) \
-                       + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
-                                       feat=tgt_out_trans,
-                                       labels=tgt_trans_mask) \
-                       + pcl_criterion(Proto=out_final_estimator.Proto.detach(),
+            # loss_out = pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
+            #                          feat=src_out_seg,
+            #                          labels=src_mask) \
+            #            + pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
+            #                            feat=tgt_out_seg,
+            #                            labels=tgt_seg_mask) \
+            #            + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
+            #                          feat=src_out_trans,
+            #                          labels=src_mask) \
+            #            + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
+            #                            feat=tgt_out_trans,
+            #                            labels=tgt_trans_mask) \
+            loss_out = pcl_criterion(Proto=out_final_estimator.Proto.detach(),
                                      feat=src_out_final_seg,
                                      labels=src_mask) \
                        + pcl_criterion(Proto=out_final_estimator.Proto.detach(),
@@ -566,7 +570,8 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
             src_feats_back = feature_extractor['B'](x)
             src_feats_seg = feature_extractor['S'](src_feats_back)
             src_feats_depth = feature_extractor['D'](src_feats_back)
-            src_feats_trans = feature_extractor['T'](src_feats_depth)
+            output_depth = classifier['D'](src_feats_depth, (512, 1024))
+            src_feats_trans = feature_extractor['T'](output_depth)
             src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
             output_seg = classifier['S'](src_feats_seg)

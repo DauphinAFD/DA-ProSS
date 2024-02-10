@@ -202,7 +202,7 @@ def train(cfg, local_rank, distributed, logger):
         src_feats_seg = feature_extractor['S'](src_feats_back)
         src_feats_depth = feature_extractor['D'](src_feats_back)
 
-        pred_depth = classifier['D'](src_feats_depth, size)
+        pred_depth = classifier['D'](src_feats_depth)
 
         src_feats_trans = feature_extractor['T'](pred_depth) # src_feats_trans = feature_extractor['T'](src_feats_depth)
         src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
@@ -224,6 +224,8 @@ def train(cfg, local_rank, distributed, logger):
             ce_seg = ce_criterion(pred_seg, src_seg_label)
             ce_trans = ce_criterion(pred_trans, src_seg_label)
             ce_final = ce_criterion(pred_seg_final, src_seg_label)
+            
+            pred_depth = F.interpolate(pred_depth, size=size, mode='bilinear', align_corners=True)
             loss_depth = berhu_criterion(pred_depth, src_depth_label)
 
             loss = ce_seg + ( cfg.SOLVER.LAMBDA_LOV * loss_lov_seg ) + \
@@ -396,7 +398,7 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
             src_feats_seg = feature_extractor['S'](src_feats_back)
             src_feats_depth = feature_extractor['D'](src_feats_back)
     
-            output_depth = classifier['D'](src_feats_depth, (512, 1024))
+            output_depth = classifier['D'](src_feats_depth)
     
             src_feats_trans = feature_extractor['T'](output_depth)
             src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)

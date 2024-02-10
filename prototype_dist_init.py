@@ -118,7 +118,7 @@ def prototype_dist_init(cfg, logger):
             
             src_feats_depth = feature_extractor['D'](src_feats_back)
             
-            src_out_depth = classifier['D'](src_feats_depth, size)
+            src_out_depth = classifier['D'](src_feats_depth)
             
             src_feats_trans = feature_extractor['T'](src_out_depth)
             

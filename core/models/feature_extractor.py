@@ -112,8 +112,6 @@ class TransferBlock(nn.Module):
         return out
 
 
-
-
 class resnet_feature_extractor(nn.Module):
     def __init__(self, backbone_name, pretrained_weights=None, aux=False, pretrained_backbone=True, freeze_bn=False):
         super(resnet_feature_extractor, self).__init__()
@@ -223,7 +221,7 @@ class TaskPredictionModule(nn.Module):
     """
         Make the initial task predictions from the backbone features.
     """
-    def __init__(self, tasks, input_channels, intermediate_channels=2048):
+    def __init__(self, input_channels, type = 'S', intermediate_channels=2048):
         super(TaskPredictionModule, self).__init__() 
         
         if input_channels != intermediate_channels:
@@ -232,18 +230,19 @@ class TaskPredictionModule(nn.Module):
         else:
             downsample = None
         bottleneck1 = BottleneckPad(input_channels, intermediate_channels//4, downsample=downsample)
-        bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
-        
-        self.layers = nn.Sequential(bottleneck1, bottleneck2)
+        if type == 'S' :
+            bottleneck2 = BottleneckPad(intermediate_channels, intermediate_channels//4, downsample=None)
+            self.layers = nn.Sequential(bottleneck1, bottleneck2)
+        else :
+            self.layers = nn.Sequential(bottleneck1)
     
-
     def forward(self, x):
         out = self.layers(x)
 
         return out 
 
 class Transfer(nn.Module):
-    def __init__(self, input_channels = 2048, intermediate_channels = 2048, stride=1, dilation=1, num_blocks=5):
+    def __init__(self, input_channels = 2048, intermediate_channels = 2048, stride=1, dilation=1, num_blocks=3):
         super(Transfer, self).__init__()
         layers = []
 
@@ -265,18 +264,6 @@ class Transfer(nn.Module):
         return out
 
 
-# class SABlock(nn.Module):
-#     """ Spatial self-attention block """
-#     def __init__(self, in_channels, out_channels):
-#         super(SABlock, self).__init__()
-#         self.attention = nn.Sequential(nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
-#                                         nn.ReLU(inplace=True))
-#         self.conv = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
-
-#     def forward(self, x):
-#         attention_mask = self.attention(x)
-#         features = self.conv(x)
-#         return torch.mul(features, attention_mask)
 
 class FinalPredictionModule(nn.Module):
     """

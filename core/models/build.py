@@ -22,7 +22,7 @@ def build_feature_extractor(cfg, TASKNAMES):
         heads['B'] = resnet_feature_extractor(backbone_name, pretrained_weights=cfg.MODEL.WEIGHTS, aux=False,
                                             pretrained_backbone=True, freeze_bn=cfg.MODEL.FREEZE_BN)
         for task in TASKNAMES:
-            heads[task] = TaskPredictionModule(auxilary_tasks, channels)
+            heads[task] = TaskPredictionModule(channels, task)
         heads['T'] = Transfer(channels)
         heads['FS'] = FinalPredictionModule(channels)
         feature = nn.ModuleDict(heads)

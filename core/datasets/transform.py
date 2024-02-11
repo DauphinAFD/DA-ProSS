@@ -34,7 +34,7 @@ class Compose(object):
 
 class ToTensor(object):
     def __call__(self, image, label, depth):
-        return F.to_tensor(image), F.to_tensor(label).squeeze(), F.to_tensor(depth)
+        return F.to_tensor(image), F.to_tensor(label).squeeze(), F.to_tensor(depth.copy())
 
 class Normalize(object):
     def __init__(self, mean, std, to_bgr255=True):
@@ -90,10 +90,11 @@ class RandomScale(object):
             if isinstance(label, np.ndarray):
                 # assert the shape of label is in the order of (h, w, c)
                 label = cv2.resize(label, (self.size[1], self.size[0]), cv2.INTER_LINEAR)
+                depth = cv2.resize(depth, (self.size[1], self.size[0]), cv2.INTER_LINEAR)
+
             else:
                 label = F.resize(label, size, Image.NEAREST)
-        #change
-        depth = cv2.resize(depth, (self.size[1], self.size[0]), cv2.INTER_LINEAR)
+                depth = cv2.resize(depth, (size[1], size[0]), cv2.INTER_LINEAR)
 
         return image, label, depth
 
@@ -171,7 +172,7 @@ class RandomCrop(object):
         else:
             label = F.crop(label, i, j, h, w)
         #change
-        depth = label[i:i + h, j:j + w, :]
+        depth = depth[i:i + h, j:j + w]
 
         return image, label, depth
 
@@ -193,7 +194,7 @@ class RandomHorizontalFlip(object):
                 else:
                     label = F.hflip(label)
             #change
-            depth = depth[:, ::-1, :]
+            depth = depth[:, ::-1]
         return image, label, depth
 
 class ColorJitter(object):

@@ -166,6 +166,10 @@ def test(cfg, thres_const):
     feature_extractor['FS'].eval()
     classifier['FS'].eval()
 
+    intersection_meter1 = AverageMeter()
+    union_meter1 = AverageMeter()
+    target_meter1 = AverageMeter()
+
     intersection_meter = AverageMeter()
     union_meter = AverageMeter()
     target_meter = AverageMeter()
@@ -196,22 +200,36 @@ def test(cfg, thres_const):
 
         pred = inference(feature_extractor, classifier['FS'], x, y, flip=False)
 
-        output = pred.max(1)[1]
-        intersection, union, target = intersectionAndUnionGPU(output, y, cfg.MODEL.NUM_CLASSES, cfg.INPUT.IGNORE_LABEL)
-        intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
-        intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
+        output1 = pred.max(1)[1]
+        intersection1, union1, target1 = intersectionAndUnionGPU(output1, y, cfg.MODEL.NUM_CLASSES, cfg.INPUT.IGNORE_LABEL)
+        intersection1, union1, target1 = intersection1.cpu().numpy(), union1.cpu().numpy(), target1.cpu().numpy()
+        intersection_meter1.update(intersection1), union_meter1.update(union1), target_meter1.update(target1)
 
-        accuracy = sum(intersection_meter.val) / (sum(target_meter.val) + 1e-10)
+        # accuracy = sum(intersection_meter1.val) / (sum(target_meter1.val) + 1e-10)
 
         # save the pseudo label
         pred = pred.cpu().numpy().squeeze()
         pred_max = np.max(pred, 0)
         pred_label = pred.argmax(0)
+
+        pred_copy = pred_label.copy()
         for i in range(cfg.MODEL.NUM_CLASSES):
-            pred_label[(pred_max < thres_const[i]) * (pred_label == i)] = 255
+            pred_copy[(pred_max < thres_const[i]) * (pred_copy == i)] = 255        
+        output = torch.Tensor(pred_copy).unsqueeze(dim = 0).cuda()
+        intersection, union, target = intersectionAndUnionGPU(output, y, cfg.MODEL.NUM_CLASSES, cfg.INPUT.IGNORE_LABEL)
+        intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
+        intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
+
+        
         mask = get_color_pallete(pred_label, "city")
         mask_filename = name[0] if len(name[0].split("/")) < 2 else name[0].split("/")[-1]
         mask.save(os.path.join(output_folder, mask_filename))
+
+    iou_class1 = intersection_meter1.sum / (union_meter1.sum + 1e-10)
+    accuracy_class1 = intersection_meter1.sum / (target_meter1.sum + 1e-10)
+    mIoU1 = np.mean(iou_class1)
+    mAcc1 = np.mean(accuracy_class1)
+    allAcc1 = sum(intersection_meter1.sum) / (sum(target_meter1.sum) + 1e-10)
 
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
     accuracy_class = intersection_meter.sum / (target_meter.sum + 1e-10)
@@ -219,7 +237,15 @@ def test(cfg, thres_const):
     mAcc = np.mean(accuracy_class)
     allAcc = sum(intersection_meter.sum) / (sum(target_meter.sum) + 1e-10)
 
-    logger.info('Val result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}.'.format(mIoU, mAcc, allAcc))
+
+
+    logger.info('Val result model: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}.'.format(mIoU1, mAcc1, allAcc1))
+    for i in range(cfg.MODEL.NUM_CLASSES):
+        logger.info(
+            '{} {} iou/accuracy: {:.4f}/{:.4f}.'.format(i, test_data.trainid2name[i], iou_class1[i], accuracy_class1[i]))
+        
+
+    logger.info('Val result label: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}.'.format(mIoU, mAcc, allAcc))
     for i in range(cfg.MODEL.NUM_CLASSES):
         logger.info(
             '{} {} iou/accuracy: {:.4f}/{:.4f}.'.format(i, test_data.trainid2name[i], iou_class[i], accuracy_class[i]))
@@ -258,7 +284,8 @@ def main():
     logger.info("Loaded configuration file {}".format(args.config_file))
     logger.info("Running with config:\n{}".format(cfg))
 
-    thres_const = get_threshold(cfg)
+    # thres_const = get_threshold(cfg)
+    thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
     test(cfg, thres_const)
 
 

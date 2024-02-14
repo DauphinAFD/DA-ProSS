@@ -54,6 +54,8 @@ _C.INPUT.HORIZONTAL_FLIP_PROB_TRAIN = 0.0
 _C.DATASETS = CN()
 # List of the dataset names for training, as present in paths_catalog.py
 _C.DATASETS.SOURCE_TRAIN = ""
+_C.DATASETS.SOURCE_TRAIN1 = ""
+_C.DATASETS.SOURCE_TRAIN2 = ""
 _C.DATASETS.TARGET_TRAIN = ""
 # List of the dataset names for testing, as present in paths_catalog.py
 _C.DATASETS.TEST = ""

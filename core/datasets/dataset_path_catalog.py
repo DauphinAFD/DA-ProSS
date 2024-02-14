@@ -5,6 +5,7 @@ from .cityscapes_soft_label import cityscapesSoftLabelDataSet
 from .synthia import synthiaDataSet
 from .gtav import GTAVDataSet
 from .gtav_strong_weak_aug import GTAVDataSetStrongWeakAug
+from .mixed_label import MixedLabelDataset
 
 
 class DatasetCatalog(object):
@@ -43,6 +44,11 @@ class DatasetCatalog(object):
             "data_dir": "cityscapes",
             "data_list": "cityscapes_val_list.txt"
         },
+        "mixed": {
+            "data_dir": "mixed_images",
+            "data_list": "",
+            "label_dir": "mixed_soft_labels"
+        }
     }
 
     @staticmethod
@@ -99,6 +105,20 @@ class DatasetCatalog(object):
                                                   split=mode, transform=transform)
             return cityscapesDataSet(args["root"], args["data_list"], max_iters=max_iters, num_classes=num_classes,
                                      split=mode, transform=transform)
+        
+        elif "mixed" in name:
+            data_dir = DatasetCatalog.DATASET_DIR
+            attrs = DatasetCatalog.DATASETS[name]
+            args = dict(
+                root=os.path.join(data_dir, attrs["data_dir"]),
+                data_list=os.path.join(data_dir, attrs["data_list"]),
+            )
+            # print("Hello from mixed")
+            args['label_dir'] = os.path.join(cfg.PREPARE_DIR, attrs["label_dir"])
+            print("Loading Mixed soft labels from{}".format(args['label_dir']))
+            return MixedLabelDataset(args["root"], args["data_list"], args['label_dir'],
+                                                max_iters=max_iters, num_classes=num_classes,
+                                                split=mode, transform=transform)
         
 
         raise RuntimeError("Dataset not available: {}".format(name))

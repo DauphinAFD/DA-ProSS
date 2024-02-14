@@ -1,0 +1,24 @@
+MODEL:
+  NAME: "deeplab_resnet101"
+  WEIGHTS: "https://download.pytorch.org/models/resnet101-5d3b4d8f.pth"
+  FREEZE_BN: False
+  NUM_CLASSES: 16
+  THRESHOLD_PERCENT: 0.6
+DATASETS:
+  SOURCE_TRAIN: "synthia_train"
+  TARGET_TRAIN: "cityscapes_train"
+  TEST: "cityscapes_val"
+INPUT:
+  SOURCE_INPUT_SIZE_TRAIN: (1280, 760)
+  INPUT_SIZE_TEST: (1024, 512)
+SOLVER:
+  MULTI_LEVEL: True
+  BASE_LR: 2e-5
+  BASE_LR_D: 0.0001
+  MAX_ITER: 360000
+  STOP_ITER: 360000
+  BATCH_SIZE: 2
+  DELTA: 0.9
+  LAMBDA_LOV: 1.0
+  LAMBDA_FEAT: 1.0
+  LAMBDA_OUT: 1.0

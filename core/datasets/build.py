@@ -23,7 +23,14 @@ def build_transform(cfg, mode, is_source):
     Returns:
 
     """
-    if mode == "train":
+    if mode == 'pseudo':
+        w, h = cfg.INPUT.INPUT_SIZE_TEST
+        trans = transform.Compose([
+            transform.Resize((h, w), resize_label=True),
+            transform.ToTensor(),
+            # transform.Normalize(mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD, to_bgr255=cfg.INPUT.TO_BGR255)
+        ])
+    elif mode == "train":
         w, h = cfg.INPUT.SOURCE_INPUT_SIZE_TRAIN if is_source else cfg.INPUT.TARGET_INPUT_SIZE_TRAIN
         trans_list = [
             transform.ToTensor(),
@@ -67,7 +74,7 @@ def build_transform(cfg, mode, is_source):
     return trans
 
 def build_dataset(cfg, mode='train', is_source=True, epochwise=False):
-    assert mode in ['train', 'val', 'test']
+    assert mode in ['train', 'val', 'test', 'pseudo', 'mixed']
     transform = build_transform(cfg, mode, is_source)
     logging.info(transform)
     iters = None
@@ -86,6 +93,21 @@ def build_dataset(cfg, mode='train', is_source=True, epochwise=False):
     elif mode == 'test':
         dataset = DatasetCatalog.get(cfg.DATASETS.TEST, cfg.DATASETS.TEST.split('_')[-1],
                                      num_classes=cfg.MODEL.NUM_CLASSES, max_iters=iters, transform=transform, cfg=cfg)
+    elif mode == 'pseudo':
+        if is_source:
+            dataset = DatasetCatalog.get(cfg.DATASETS.SOURCE_TRAIN, 'train', num_classes=cfg.MODEL.NUM_CLASSES,
+                                         max_iters=iters, transform=transform, cfg=cfg)
+        else:
+            dataset = DatasetCatalog.get(cfg.DATASETS.TEST, cfg.DATASETS.TEST.split('_')[-1],
+                                     num_classes=cfg.MODEL.NUM_CLASSES, max_iters=iters, transform=transform, cfg=cfg)
+    elif mode == 'mixed':
+        if is_source:
+            dataset = DatasetCatalog.get(cfg.DATASETS.SOURCE_TRAIN1, 'train', num_classes=cfg.MODEL.NUM_CLASSES,
+                                         max_iters=iters, transform=transform, cfg=cfg)
+        else:
+            dataset = DatasetCatalog.get(cfg.DATASETS.SOURCE_TRAIN2, 'train', num_classes=cfg.MODEL.NUM_CLASSES,
+                                         max_iters=iters, transform=transform, cfg=cfg)
+
     return dataset
 
 def build_strong_weak_aug_dataset(cfg, mode='train', is_source=True, epochwise=False, logger=None):

@@ -4,7 +4,9 @@ MODEL:
   FREEZE_BN: False
   NUM_CLASSES: 16
 DATASETS:
-  SOURCE_TRAIN: "cityscapes_train_soft"
+  SOURCE_TRAIN: ""
+  SOURCE_TRAIN1: "mixed"
+  SOURCE_TRAIN2: "cityscapes_train_soft"
   TEST: "cityscapes_val"
 INPUT:
   SOURCE_INPUT_SIZE_TRAIN: (1024, 512)

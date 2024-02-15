@@ -7,10 +7,12 @@ from collections import OrderedDict
 from time import sleep
 from PIL import Image
 import cv2
+from core.datasets import transform
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision.transforms import functional as Fnorn
 import torch.backends.cudnn
 import kornia
 import matplotlib.pyplot as plt
@@ -265,7 +267,9 @@ def test(cfg, thres_const):
         tgt_input = tgt_input.cuda(non_blocking=True)
         tgt_label = tgt_label.cuda(non_blocking=True).long()
 
-        pred = inference(feature_extractor, classifier['FS'], tgt_input, tgt_label, flip=False)
+        tgt_copy = tgt_input.clone()
+        tgt_copy = Fnorn.normalize(tgt_copy, mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD)
+        pred = inference(feature_extractor, classifier['FS'], tgt_copy, tgt_label, flip=False)
 
         pred = pred.cpu().numpy().squeeze()
         pred_max = np.max(pred, 0)

@@ -212,10 +212,12 @@ def test(cfg, thres_const):
         pred_max = np.max(pred, 0)
         pred_label = pred.argmax(0)
 
-        pred_copy = pred_label.copy()
+        # pred_copy = pred_label.copy()
         for i in range(cfg.MODEL.NUM_CLASSES):
-            pred_copy[(pred_max < thres_const[i]) * (pred_copy == i)] = 255        
-        output = torch.Tensor(pred_copy).unsqueeze(dim = 0).cuda()
+            pred_label[(pred_max < thres_const[i]) * (pred_label == i)] = 255        
+
+            
+        output = torch.Tensor(pred_label).unsqueeze(dim = 0).cuda()
         intersection, union, target = intersectionAndUnionGPU(output, y, cfg.MODEL.NUM_CLASSES, cfg.INPUT.IGNORE_LABEL)
         intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
         intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
@@ -284,8 +286,8 @@ def main():
     logger.info("Loaded configuration file {}".format(args.config_file))
     logger.info("Running with config:\n{}".format(cfg))
 
-    # thres_const = get_threshold(cfg)
-    thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
+    thres_const = get_threshold(cfg)
+    # thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
     test(cfg, thres_const)
 
 

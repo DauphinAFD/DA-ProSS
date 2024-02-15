@@ -104,14 +104,14 @@ def train(cfg, local_rank, distributed, logger):
         classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
             checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
-        # if "optimizer_fea" in checkpoint:
-        #     logger.info("Loading optimizer_fea from {}".format(cfg.resume))
-        #     optimizer_fea.load(checkpoint['optimizer_fea'])
-        # if "optimizer_cls" in checkpoint:
-        #     logger.info("Loading optimizer_cls from {}".format(cfg.resume))
-        #     optimizer_cls.load(checkpoint['optimizer_cls'])
-        # if "iteration" in checkpoint:
-        #     iteration = checkpoint['iteration']
+        if "optimizer_fea" in checkpoint:
+            logger.info("Loading optimizer_fea from {}".format(cfg.resume))
+            optimizer_fea.load_state_dict(checkpoint['optimizer_fea'])
+        if "optimizer_cls" in checkpoint:
+            logger.info("Loading optimizer_cls from {}".format(cfg.resume))
+            optimizer_cls.load_state_dict(checkpoint['optimizer_cls'])
+        if "iteration" in checkpoint:
+            iteration = checkpoint['iteration']
 
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
 
@@ -124,7 +124,7 @@ def train(cfg, local_rank, distributed, logger):
         src_train_data,
         batch_size=batch_size,
         shuffle=(train_sampler is None),
-        num_workers=4,
+        num_workers=0,
         pin_memory=True,
         sampler=train_sampler,
         drop_last=True
@@ -178,15 +178,15 @@ def train(cfg, local_rank, distributed, logger):
         size = src_label.shape[-2:]
         
         src_feats_back = feature_extractor['B'](src_input)
-        src_feats_seg = feature_extractor['S'](src_feats_back)
-        src_feats_depth = feature_extractor['D'](src_feats_back)
-        src_feats_trans = feature_extractor['T'](src_feats_depth)
-        src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
+        # src_feats_seg = feature_extractor['S'](src_feats_back)
+        # src_feats_depth = feature_extractor['D'](src_feats_back)
+        # src_feats_trans = feature_extractor['T'](src_feats_depth)
+        # src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
         # pred_seg = classifier['S'](src_feats_seg, size)
         # pred_depth = classifier['D'](src_feats_depth, size)
         # pred_trans = classifier['T'](src_feats_trans, size)
-        pred_seg_final = classifier['FS'](src_feats_final, size)
+        pred_seg_final = classifier['S'](src_feats_back, size)
 
 
         loss = ce_criterion(pred_seg_final, src_label)
@@ -236,9 +236,9 @@ def train(cfg, local_rank, distributed, logger):
             feature_extractor['S'].train()
             feature_extractor['T'].train()
             feature_extractor['FS'].train()
-            # classifier['S'].train()
-            # classifier['D'].train()
-            # classifier['T'].train()
+            classifier['S'].train()
+            classifier['D'].train()
+            classifier['T'].train()
             classifier['FS'].train()
 
             if save_to_disk:
@@ -324,9 +324,9 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
     feature_extractor['S'].eval()
     feature_extractor['T'].eval()
     feature_extractor['FS'].eval()
-    # classifier['S'].eval()
-    # classifier['D'].eval()
-    # classifier['T'].eval()
+    classifier['S'].eval()
+    classifier['D'].eval()
+    classifier['T'].eval()
     classifier['FS'].eval()
 
     end = time.time()
@@ -338,14 +338,14 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
             size = y.shape[-2:]
 
             src_feats_back = feature_extractor['B'](x)
-            src_feats_seg = feature_extractor['S'](src_feats_back)
-            src_feats_depth = feature_extractor['D'](src_feats_back)
-            src_feats_trans = feature_extractor['T'](src_feats_depth)
-            src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
+            # src_feats_seg = feature_extractor['S'](src_feats_back)
+            # src_feats_depth = feature_extractor['D'](src_feats_back)
+            # src_feats_trans = feature_extractor['T'](src_feats_depth)
+            # src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
 
             # output_seg = classifier['S'](src_feats_seg)
             # output_trans = classifier['T'](src_feats_trans)
-            output_final = classifier['FS'](src_feats_final)
+            output_final = classifier['S'](src_feats_back)
 
             # output_seg = F.interpolate(output_seg, size=size, mode='bilinear', align_corners=True)
             # output_seg = output_seg.max(1)[1]

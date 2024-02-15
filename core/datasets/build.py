@@ -64,6 +64,13 @@ def build_transform(cfg, mode, is_source):
                              transform.RandomCrop(size=(h, w), pad_if_needed=True),
                          ] + trans_list
         trans = transform.Compose(trans_list)
+    elif mode == 'mixed':
+        w, h = cfg.INPUT.SOURCE_INPUT_SIZE_TRAIN
+        trans = transform.Compose([
+            transform.Resize((h, w), resize_label=False),
+            transform.ToTensor(),
+            transform.Normalize(mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD, to_bgr255=cfg.INPUT.TO_BGR255)
+        ])
     else:
         w, h = cfg.INPUT.INPUT_SIZE_TEST
         trans = transform.Compose([

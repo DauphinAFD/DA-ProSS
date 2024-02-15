@@ -4,7 +4,7 @@ import datetime
 import logging
 import time
 import numpy as np
-# import wandb
+import wandb
 import torch
 import torch.nn.functional as F
 import torch.utils.data
@@ -40,10 +40,10 @@ def train(cfg, local_rank, distributed, logger):
     NUM_CLASSES = {"S": 16, "D": 1}
     TASKNAMES = ["S", "D"]
 
-    # run = wandb.init(
-    #     project = 'DA-ProSS',
-    #     config = cfg
-    # )
+    run = wandb.init(
+        project = 'DA-ProSS',
+        config = cfg
+    )
 
     feature_extractor = build_feature_extractor(cfg, TASKNAMES)
     classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
@@ -227,7 +227,7 @@ def train(cfg, local_rank, distributed, logger):
         # src_depth_label = src_depth_label.cuda(non_blocking=True).long()
 
         size = src_label.shape[-2:]
-        
+
         src_feats_back = feature_extractor['B'](src_input)
         # src_feats_seg = feature_extractor['S'](src_feats_back)
     #     src_feats_depth = feature_extractor['D'](src_feats_back)
@@ -251,11 +251,11 @@ def train(cfg, local_rank, distributed, logger):
         batch_time = time.time() - end
         end = time.time()
 
-    #     wandb.log({
-    #         "loss": loss.item(),
-    #         "lr": current_lr,
-    #         "batch_time": batch_time,
-    #     })
+        wandb.log({
+            "loss": loss.item(),
+            "lr": current_lr,
+            "batch_time": batch_time,
+        })
 
         meters.update(time=batch_time, data=data_time)
         eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
@@ -308,13 +308,13 @@ def train(cfg, local_rank, distributed, logger):
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
                 logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
 
-            # # Wandb Evaluation Log
-            # wandb.log({
-            #     "Current Best mIoU": best_mIoU,
-            #     "allAcc_final": allAcc_final,
-            #     "mAcc_final": mAcc_final,
-            #     "mIoU_final": mIoU_final,
-            # })
+            # Wandb Evaluation Log
+            wandb.log({
+                "Current Best mIoU": best_mIoU,
+                "allAcc_final": allAcc_final,
+                "mAcc_final": mAcc_final,
+                "mIoU_final": mIoU_final,
+            })
             
             torch.cuda.empty_cache()
 
@@ -326,7 +326,7 @@ def train(cfg, local_rank, distributed, logger):
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
 
-    # wandb.finish()
+    wandb.finish()
 
     logger.info(
         "Total training time: {} ({:.4f} s / it)".format(

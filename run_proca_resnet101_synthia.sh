@@ -15,6 +15,9 @@ NGPUS=1
 # python3 DACS.py -cfg configs/synthia/deeplabv2_r101_pseudo.yaml DATASETS.TEST cityscapes_train resume results/synthia/r101_g2c_ours_proca/model_best.pth OUTPUT_DIR results/synthia/r101_g2c_ours_proca SOLVER.BATCH_SIZE_VAL 1
 
 # train with generated pseudo label
-torchrun --nproc_per_node=$NGPUS train_dassl.py -cfg configs/synthia/deeplabv2_r101_ssl.yaml PREPARE_DIR results/synthia/r101_g2c_ours_proca/ OUTPUT_DIR results/synthia/r101_g2c_ours_proca_ssl SOLVER.BATCH_SIZE 2
+# torchrun --nproc_per_node=$NGPUS train_dassl.py -cfg configs/synthia/deeplabv2_r101_ssl.yaml PREPARE_DIR results/synthia/r101_g2c_ours_proca/ OUTPUT_DIR results/synthia/r101_g2c_ours_proca_ssl SOLVER.BATCH_SIZE 2
+
+# train with generated pseudo label
+torchrun --nproc_per_node=$NGPUS train_ssl.py -cfg configs/synthia/deeplabv2_r101_ssl.yaml resume results/synthia/r101_g2c_ours_proca_ssl/model_best.pth PREPARE_DIR results/synthia/r101_g2c_ours_proca/ OUTPUT_DIR results/synthia/r101_g2c_ours_proca_ssl SOLVER.BATCH_SIZE 2
 
 

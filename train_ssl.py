@@ -50,16 +50,16 @@ def train(cfg, local_rank, distributed, logger):
     device = torch.device(cfg.MODEL.DEVICE)
     # feature_extractor.to(device)
     feature_extractor['B'].to(device)
-    feature_extractor['S'].to(device)
-    feature_extractor['D'].to(device)
-    feature_extractor['T'].to(device)
-    feature_extractor['FS'].to(device)
+    # feature_extractor['S'].to(device)
+    # feature_extractor['D'].to(device)
+    # feature_extractor['T'].to(device)
+    # feature_extractor['FS'].to(device)
 
     # classifier.to(device)
     classifier['S'].to(device)
-    classifier['D'].to(device)
-    classifier['T'].to(device)
-    classifier['FS'].to(device)
+    # classifier['D'].to(device)
+    # classifier['T'].to(device)
+    # classifier['FS'].to(device)
 
     batch_size = cfg.SOLVER.BATCH_SIZE
     
@@ -67,20 +67,20 @@ def train(cfg, local_rank, distributed, logger):
         print(feature_extractor)
         print(classifier)
 
-    param_groups_fea = [{'params': feature_extractor['B'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                        {'params': feature_extractor['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
-                        {'params': feature_extractor['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                        {'params': feature_extractor['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                        {'params': feature_extractor['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    param_groups_fea = [{'params': feature_extractor['B'].parameters(), 'lr': cfg.SOLVER.BASE_LR}]
+                        # {'params': feature_extractor['D'].parameters(), 'lr': cfg.SOLVER.BASE_LR},
+                        # {'params': feature_extractor['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                        # {'params': feature_extractor['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                        # {'params': feature_extractor['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
     optimizer_fea = torch.optim.SGD(param_groups_fea, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
     optimizer_fea.zero_grad()
 
-    param_groups_cls = [{'params': classifier['D'].parameters(), 'lr': 1*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
-                    {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
+    param_groups_cls = [{'params': classifier['S'].parameters(), 'lr': 1*cfg.SOLVER.BASE_LR}]
+                    # {'params': classifier['T'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    # {'params': classifier['S'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR},
+                    # {'params': classifier['FS'].parameters(), 'lr': 10*cfg.SOLVER.BASE_LR}]
     
     optimizer_cls = torch.optim.SGD(param_groups_cls, momentum=cfg.SOLVER.MOMENTUM,
                                     weight_decay=cfg.SOLVER.WEIGHT_DECAY)
@@ -110,8 +110,8 @@ def train(cfg, local_rank, distributed, logger):
         if "optimizer_cls" in checkpoint:
             logger.info("Loading optimizer_cls from {}".format(cfg.resume))
             optimizer_cls.load_state_dict(checkpoint['optimizer_cls'])
-        if "iteration" in checkpoint:
-            iteration = checkpoint['iteration']
+        # if "iteration" in checkpoint:
+        #     iteration = checkpoint['iteration']
 
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
 
@@ -138,15 +138,15 @@ def train(cfg, local_rank, distributed, logger):
     meters = MetricLogger(delimiter="  ")
     
     feature_extractor['B'].train()
-    feature_extractor['D'].train()
-    feature_extractor['S'].train()
-    feature_extractor['T'].train()
-    feature_extractor['FS'].train()
+    # feature_extractor['D'].train()
+    # feature_extractor['S'].train()
+    # feature_extractor['T'].train()
+    # feature_extractor['FS'].train()
     
     classifier['S'].train()
-    classifier['D'].train()
-    classifier['T'].train()
-    classifier['FS'].train()
+    # classifier['D'].train()
+    # classifier['T'].train()
+    # classifier['FS'].train()
 
     start_training_time = time.time()
     end = time.time()
@@ -232,14 +232,14 @@ def train(cfg, local_rank, distributed, logger):
             mIoU_final, mAcc_final, allAcc_final = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
             
             feature_extractor['B'].train()
-            feature_extractor['D'].train()
-            feature_extractor['S'].train()
-            feature_extractor['T'].train()
-            feature_extractor['FS'].train()
+            # feature_extractor['D'].train()
+            # feature_extractor['S'].train()
+            # feature_extractor['T'].train()
+            # feature_extractor['FS'].train()
             classifier['S'].train()
-            classifier['D'].train()
-            classifier['T'].train()
-            classifier['FS'].train()
+            # classifier['D'].train()
+            # classifier['T'].train()
+            # classifier['FS'].train()
 
             if save_to_disk:
                 # update best model
@@ -320,14 +320,14 @@ def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger
                                               pin_memory=True, sampler=test_sampler)
     
     feature_extractor['B'].eval()
-    feature_extractor['D'].eval()
-    feature_extractor['S'].eval()
-    feature_extractor['T'].eval()
-    feature_extractor['FS'].eval()
+    # feature_extractor['D'].eval()
+    # feature_extractor['S'].eval()
+    # feature_extractor['T'].eval()
+    # feature_extractor['FS'].eval()
     classifier['S'].eval()
-    classifier['D'].eval()
-    classifier['T'].eval()
-    classifier['FS'].eval()
+    # classifier['D'].eval()
+    # classifier['T'].eval()
+    # classifier['FS'].eval()
 
     end = time.time()
     with torch.no_grad():

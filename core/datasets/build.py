@@ -66,11 +66,42 @@ def build_transform(cfg, mode, is_source):
         trans = transform.Compose(trans_list)
     elif mode == 'mixed':
         w, h = cfg.INPUT.SOURCE_INPUT_SIZE_TRAIN
-        trans = transform.Compose([
-            transform.Resize((h, w), resize_label=False),
+        trans_list = [
+            # transform.Resize((h, w), resize_label=False),
             transform.ToTensor(),
             transform.Normalize(mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD, to_bgr255=cfg.INPUT.TO_BGR255)
-        ])
+        ]
+        
+        if cfg.INPUT.GAUSSIANBLUR:
+            trans_list = [
+                                transform.GaussianBlur(kernel_size=[3, 3])
+                            ] + trans_list
+        if cfg.INPUT.GRAYSCALE > 0:
+            trans_list = [
+                                transform.RandomGrayscale(p=cfg.INPUT.GRAYSCALE)
+                            ] + trans_list
+        if cfg.INPUT.BRIGHTNESS > 0:
+            trans_list = [
+                                transform.ColorJitter(
+                                    brightness=cfg.INPUT.BRIGHTNESS,
+                                    contrast=cfg.INPUT.CONTRAST,
+                                    saturation=cfg.INPUT.SATURATION,
+                                    hue=cfg.INPUT.HUE,
+                                )
+                            ] + trans_list
+        if cfg.INPUT.HORIZONTAL_FLIP_PROB_TRAIN > 0:
+            trans_list = [transform.RandomHorizontalFlip(p=cfg.INPUT.HORIZONTAL_FLIP_PROB_TRAIN), ] + trans_list
+        if cfg.INPUT.INPUT_SCALES_TRAIN[0] == cfg.INPUT.INPUT_SCALES_TRAIN[1] and cfg.INPUT.INPUT_SCALES_TRAIN[0] == 1:
+            trans_list = [transform.Resize((h, w)), ] + trans_list
+        else:
+            trans_list = [
+                             transform.RandomScale(scale=cfg.INPUT.INPUT_SCALES_TRAIN),
+                             transform.RandomCrop(size=(h, w), pad_if_needed=True),
+                         ] + trans_list
+            
+        trans = transform.Compose(trans_list)
+        print(trans_list)
+        
     else:
         w, h = cfg.INPUT.INPUT_SIZE_TEST
         trans = transform.Compose([

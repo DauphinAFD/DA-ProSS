@@ -136,7 +136,7 @@ def build_dataset(cfg, mode='train', is_source=True, epochwise=False):
             dataset = DatasetCatalog.get(cfg.DATASETS.SOURCE_TRAIN, 'train', num_classes=cfg.MODEL.NUM_CLASSES,
                                          max_iters=iters, transform=transform, cfg=cfg)
         else:
-            dataset = DatasetCatalog.get(cfg.DATASETS.TEST, cfg.DATASETS.TEST.split('_')[-1],
+            dataset = DatasetCatalog.get(cfg.DATASETS.TARGET_TRAIN, cfg.DATASETS.TARGET_TRAIN.split('_')[-1],
                                      num_classes=cfg.MODEL.NUM_CLASSES, max_iters=iters, transform=transform, cfg=cfg)
     elif mode == 'mixed':
         if is_source:

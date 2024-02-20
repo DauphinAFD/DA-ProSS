@@ -105,17 +105,19 @@ def train(cfg, local_rank, distributed, logger):
         classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
             checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
-        # if "optimizer_fea" in checkpoint:
-        #     logger.info("Loading optimizer_fea from {}".format(cfg.resume))
-        #     optimizer_fea.load(checkpoint['optimizer_fea'])
-        # if "optimizer_cls" in checkpoint:
-        #     logger.info("Loading optimizer_cls from {}".format(cfg.resume))
-        #     optimizer_cls.load(checkpoint['optimizer_cls'])
-        # if "iteration" in checkpoint:
-        #     iteration = checkpoint['iteration']
+        if "optimizer_fea" in checkpoint:
+            logger.info("Loading optimizer_fea from {}".format(cfg.resume))
+            optimizer_fea.load_state_dict(checkpoint['optimizer_fea'])
+        if "optimizer_cls" in checkpoint:
+            logger.info("Loading optimizer_cls from {}".format(cfg.resume))
+            optimizer_cls.load_state_dict(checkpoint['optimizer_cls'])
+        if "iteration" in checkpoint:
+            iteration = checkpoint['iteration']
 
     mixed_train_data = build_dataset(cfg, mode='mixed', is_source=True)
     pred_train_data = build_dataset(cfg, mode='mixed', is_source=False)
+
+    print(iteration)
 
     # if distributed:
     #     train_sampler = torch.utils.data.distributed.DistributedSampler(src_train_data)
@@ -171,14 +173,14 @@ def train(cfg, local_rank, distributed, logger):
     best_iteration = 0
 
     mix_chance = 1.0
-    mix_rate = 0.0
+    mix_rate = 0.05
     drip_counter = 0
 
-    for iteration in range(cfg.SOLVER.STOP_ITER):
+    for i in range(cfg.SOLVER.STOP_ITER):
     # for i, (src_input, src_label, _, name) in enumerate(train_loader):
         data_time = time.time() - end
 
-        if iteration > 100000:
+        if iteration > 30000:
             if drip_counter >= 1000:
                 drip_counter = 0
                 mix_chance -= mix_rate

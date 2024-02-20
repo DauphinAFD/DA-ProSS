@@ -6,8 +6,12 @@ import time
 import numpy as np
 import wandb
 import torch
+import kornia
+import torch.nn as nn
+import random
 import torch.nn.functional as F
 import torch.utils.data
+import matplotlib.pyplot as plt
 
 from core.configs import cfg
 from core.datasets import build_dataset
@@ -16,7 +20,7 @@ from core.solver import adjust_learning_rate
 from core.utils.misc import mkdir, AverageMeter, intersectionAndUnionGPU
 from core.utils.logger import setup_logger
 from core.utils.metric_logger import MetricLogger
-from core.utils.loss import BerhuLoss
+from core.utils.loss import BerhuLoss,CrossEntropyLoss2dPixelWiseWeighted
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -31,6 +35,111 @@ def strip_prefix_if_present(state_dict, prefix):
             continue
         stripped_state_dict[key.replace(prefix, "")] = value
     return stripped_state_dict
+
+
+void_classes = [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30, -1]
+valid_classes = [7, 8, 11, 12, 13, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33,]
+
+IMG_MEAN = np.array((122.67891434, 116.66876762, 104.00698793), dtype=np.float32)
+
+ignore_index = 250
+class_map = dict(zip(valid_classes, range(19)))
+
+def encode_segmap(mask):
+        # Put all void classes to zero
+        for _voidc in void_classes:
+            mask[mask == _voidc] = ignore_index
+        for _validc in valid_classes:
+            mask[mask == _validc] = class_map[_validc]
+        return mask
+
+def colorJitter(colorJitter, img_mean, data = None, target = None, s=0.5):
+    # s is the strength of colorjitter
+    #colorJitter
+    if not (data is None):
+        if data.shape[1]==3:
+            if colorJitter > 0.2:
+                # print("inside Color jitter")
+                img_mean, _ = torch.broadcast_tensors(img_mean.unsqueeze(0).unsqueeze(2).unsqueeze(3), data)
+                seq = nn.Sequential(kornia.augmentation.ColorJitter(brightness=s,contrast=s,saturation=s,hue=0.2))
+                data = (data+img_mean)/255
+                data = seq(data)
+                data = (data*255-img_mean).float()
+    return data, target
+
+def gaussian_blur(blur, data = None, target = None):
+    if not (data is None):
+        if data.shape[1]==3:
+            if blur > 0.5:
+                sigma = np.random.uniform(0.15,1.15)
+                kernel_size_y = int(np.floor(np.ceil(0.1 * data.shape[2]) - 0.5 + np.ceil(0.1 * data.shape[2]) % 2))
+                kernel_size_x = int(np.floor(np.ceil(0.1 * data.shape[3]) - 0.5 + np.ceil(0.1 * data.shape[3]) % 2))
+                kernel_size = (kernel_size_y, kernel_size_x)
+                seq = nn.Sequential(kornia.filters.GaussianBlur2d(kernel_size=kernel_size, sigma=(sigma, sigma)))
+                data = seq(data)
+    return data, target
+
+def generate_class_mask(pred, classes):
+    pred, classes = torch.broadcast_tensors(pred.unsqueeze(0), classes.unsqueeze(1).unsqueeze(2))
+    N = pred.eq(classes).sum(0)
+    return N
+
+def oneMix(mask, data = None, target = None):
+    #Mix
+    if not (data is None):
+        stackedMask0, _ = torch.broadcast_tensors(mask[0], data[0])
+        data = (stackedMask0*data[0]+(1-stackedMask0)*data[1]).unsqueeze(0)
+    if not (target is None):
+        stackedMask0, _ = torch.broadcast_tensors(mask[0], target[0])
+        target = (stackedMask0*target[0]+(1-stackedMask0)*target[1]).unsqueeze(0)
+    return data, target
+
+def strongTransform(parameters, data=None, target=None):
+    assert ((data is not None) or (target is not None))
+    # print(parameters)
+    data, target = oneMix(mask = parameters["Mix"], data = data, target = target)
+    data, target = colorJitter(colorJitter = parameters["ColorJitter"], img_mean = torch.from_numpy(IMG_MEAN.copy()).cuda(), data = data, target = target)
+    data, target = gaussian_blur(blur = parameters["GaussianBlur"], data = data, target = target)
+    # data, target = transformsgpu.flip(flip = parameters["flip"], data = data, target = target)
+    
+    return data, target
+
+def create_ema_model(feature_extractor,classifier,TASKNAMES, NUM_CLASSES):
+
+    ema_feature_extractor = build_feature_extractor(cfg, TASKNAMES)
+    ema_classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
+
+    # For Feature Extractor
+    for param in ema_feature_extractor.parameters():
+        param.detach_()
+    feature_mp = list(feature_extractor.parameters())
+    feature_mcp = list(ema_feature_extractor.parameters())
+    n = len(feature_mp)
+    for i in range(0, n):
+        feature_mcp[i].data[:] = feature_mp[i].data[:].clone()
+
+    # For Classifier
+    for param in ema_classifier.parameters():
+        param.detach_()
+    classifier_mp = list(classifier.parameters())
+    classifier_mcp = list(ema_classifier.parameters())
+    n = len(classifier_mp)
+    for i in range(0, n):
+        classifier_mcp[i].data[:] = classifier_mp[i].data[:].clone()
+
+    return ema_feature_extractor, ema_classifier
+
+def update_ema_variables(ema_feature_extractor, ema_classifier, feature_extractor,classifier, alpha_teacher, iteration):
+    # Use the "true" average until the exponential average is more correct
+    alpha_teacher = min(1 - 1 / (iteration + 1), alpha_teacher)
+    
+    for ema_param_feat, param_feat in zip(ema_feature_extractor.parameters(), feature_extractor.parameters()):
+        ema_param_feat.data[:] = alpha_teacher * ema_param_feat[:].data[:] + (1 - alpha_teacher) * param_feat[:].data[:]
+
+    for ema_param_classi, param_classi in zip(ema_feature_extractor.parameters(), feature_extractor.parameters()):
+        ema_param_classi.data[:] = alpha_teacher * ema_param_classi[:].data[:] + (1 - alpha_teacher) * param_classi[:].data[:]
+    
+    return ema_feature_extractor, ema_classifier
 
 
 def train(cfg, local_rank, distributed, logger):
@@ -50,16 +159,12 @@ def train(cfg, local_rank, distributed, logger):
     device = torch.device(cfg.MODEL.DEVICE)
     # feature_extractor.to(device)
     feature_extractor['B'].to(device)
-    # feature_extractor['S'].to(device)
-    # feature_extractor['D'].to(device)
-    # feature_extractor['T'].to(device)
-    # feature_extractor['FS'].to(device)
-
     # classifier.to(device)
     classifier['S'].to(device)
-    # classifier['D'].to(device)
-    # classifier['T'].to(device)
-    # classifier['FS'].to(device)
+
+    ema_feature_extractor, ema_classifier = create_ema_model(feature_extractor,classifier,TASKNAMES, NUM_CLASSES)
+    ema_feature_extractor['B'].to(device)
+    ema_classifier['S'].to(device)
 
     batch_size = cfg.SOLVER.BATCH_SIZE
     
@@ -104,6 +209,13 @@ def train(cfg, local_rank, distributed, logger):
         classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
             checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
+
+        ema_model_weights = checkpoint['ema_feature_extractor'] if distributed else strip_prefix_if_present(
+            checkpoint['ema_feature_extractor'], 'module.')
+        ema_feature_extractor.load_state_dict(ema_model_weights)
+        ema_classifier_weights = checkpoint['ema_classifier'] if distributed else strip_prefix_if_present(
+            checkpoint['ema_classifier'], 'module.')
+        ema_classifier.load_state_dict(ema_classifier_weights)
         if "optimizer_fea" in checkpoint:
             logger.info("Loading optimizer_fea from {}".format(cfg.resume))
             optimizer_fea.load_state_dict(checkpoint['optimizer_fea'])
@@ -125,11 +237,13 @@ def train(cfg, local_rank, distributed, logger):
     tgt_train_loader = torch.utils.data.DataLoader(tgt_train_data, batch_size=batch_size,
                                                    shuffle=(tgt_train_sampler is None), num_workers=0,
                                                    pin_memory=True, sampler=tgt_train_sampler, drop_last=True)
-
+    # tgt_train_loader = iter(tgt_train_loader)
 
 
     ce_criterion = torch.nn.CrossEntropyLoss(ignore_index=255)
     berhu_criterion = BerhuLoss().cuda()
+    unlabeled_loss = CrossEntropyLoss2dPixelWiseWeighted(ignore_index=255).cuda()
+
 
     max_iters = cfg.SOLVER.MAX_ITER
     logger.info("Start training")
@@ -146,15 +260,29 @@ def train(cfg, local_rank, distributed, logger):
     # classifier['T'].train()
     # classifier['FS'].train()
 
+    ema_feature_extractor['B'].train()
+    ema_classifier['S'].train()
+
     start_training_time = time.time()
     end = time.time()
 
     best_mIoU = 0
     best_iteration = 0
 
-    for iteration in range(cfg.SOLVER.STOP_ITER):
+    for i in range(cfg.SOLVER.STOP_ITER):
     # for i, (src_input, src_label, _, _) in enumerate(train_loader):
         data_time = time.time() - end
+
+        optimizer_fea.zero_grad()
+        optimizer_cls.zero_grad()
+        current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
+                                          power=cfg.SOLVER.LR_POWER)
+        optimizer_fea.param_groups[0]['lr'] = current_lr
+
+        for index in range(1, len(optimizer_fea.param_groups)):
+            optimizer_fea.param_groups[index]['lr'] = current_lr * 10
+        for index in range(len(optimizer_cls.param_groups)):
+            optimizer_cls.param_groups[index]['lr'] = current_lr * 10
 
         try:
             tgt_batch = next(tgt_train_loader)
@@ -165,133 +293,196 @@ def train(cfg, local_rank, distributed, logger):
             tgt_batch = next(tgt_train_loader)
 
         tgt_input, tgt_label, _, name = tgt_batch
-        print(tgt_input.shape)
-        print(tgt_label.shape)
         
+        tgt_input = tgt_input.cuda(non_blocking=True)
+        tgt_label = tgt_label.cuda(non_blocking=True).long()
 
-    #     optimizer_fea.zero_grad()
-    #     optimizer_cls.zero_grad()
-    #     current_lr = adjust_learning_rate(cfg.SOLVER.LR_METHOD, cfg.SOLVER.BASE_LR, iteration, max_iters,
-    #                                       power=cfg.SOLVER.LR_POWER)
-    #     optimizer_fea.param_groups[0]['lr'] = current_lr
+        size = tgt_label.shape[-2:]
+        
+        tgt_feats_back = feature_extractor['B'](tgt_input)
+        pred_seg_final = classifier['S'](tgt_feats_back, size)
 
-    #     for index in range(1, len(optimizer_fea.param_groups)):
-    #         optimizer_fea.param_groups[index]['lr'] = current_lr * 10
-    #     for index in range(len(optimizer_cls.param_groups)):
-    #         optimizer_cls.param_groups[index]['lr'] = current_lr * 10
+        # pseudo_label = torch.softmax(pred_seg_final.detach(), dim=1)
+        # max_probs, pred_label = torch.max(pseudo_label, dim=1)
+        # max_probs, pred_label = torch.max(tgt_label, dim=1)
+
+
+        L_1 = ce_criterion(pred_seg_final, tgt_label)
+
+        # if True : 
+        try:
+            src_batch = next(src_train_loader)
+            if src_batch[0].shape[0] != batch_size:
+                src_batch = next(src_train_loader)
+        except:
+            # epochs_since_start = epochs_since_start + 1
+            # print('Epochs since start: ',epochs_since_start)
+            src_train_loader = iter(src_train_loader)
+            src_batch = next(src_train_loader)
+
+        src_input, src_label, _, name = src_batch
+
+        src_input = src_input.cuda(non_blocking=True)
+        src_label = src_label.cuda(non_blocking=True).long()
+
+        for image_i in range(batch_size) :
+
+            classes = torch.unique(src_label[image_i])
+            nclasses = classes.shape[0]
+
+            # if nclasses > 0:
+            classes = (classes[torch.Tensor(np.random.choice(nclasses, int((nclasses+nclasses%2)/2),replace=False)).long()]).cuda()
+            if image_i == 0:
+                MixMask0 = generate_class_mask(src_label[image_i], classes).unsqueeze(0).cuda()
+            else:
+                MixMask1 = generate_class_mask(src_label[image_i], classes).unsqueeze(0).cuda()
 
         
-    #     src_input = src_input.cuda(non_blocking=True)
-    #     src_label = src_label.cuda(non_blocking=True).long()
-    #     # src_depth_label = src_depth_label.cuda(non_blocking=True).long()
-
-    #     size = src_label.shape[-2:]
         
-    #     src_feats_back = feature_extractor['B'](src_input)
-    #     # src_feats_seg = feature_extractor['S'](src_feats_back)
-    #     # src_feats_depth = feature_extractor['D'](src_feats_back)
-    #     # src_feats_trans = feature_extractor['T'](src_feats_depth)
-    #     # src_feats_final = feature_extractor['FS'](src_feats_seg, src_feats_trans)
+        # # strong_parameters["flip"] = 0
+        strong_parameters = {"Mix": MixMask0}
+        strong_parameters["ColorJitter"] = random.uniform(0, 1)
+        strong_parameters["GaussianBlur"] = random.uniform(0, 1)
+        
+        mixed_img_0, _ = strongTransform(strong_parameters, data = torch.cat((src_input[0].unsqueeze(0), tgt_input[0].unsqueeze(0))))
+        strong_parameters["Mix"] = MixMask1
+        mixed_img_1, _ = strongTransform(strong_parameters, data = torch.cat((src_input[1].unsqueeze(0), tgt_input[1].unsqueeze(0))))
+        mixed_input = torch.cat((mixed_img_0,mixed_img_1))
 
-    #     # pred_seg = classifier['S'](src_feats_seg, size)
-    #     # pred_depth = classifier['D'](src_feats_depth, size)
-    #     # pred_trans = classifier['T'](src_feats_trans, size)
-    #     pred_seg_final = classifier['S'](src_feats_back, size)
+    
+
+        mixed_feats_back = ema_feature_extractor['B'](mixed_input)
+        mixed_seg_final = ema_classifier['S'](mixed_feats_back, size)
 
 
-    #     loss = ce_criterion(pred_seg_final, src_label)
-    #     loss.backward()
+        strong_parameters["Mix"] = MixMask0
+        strong_parameters["ColorJitter"] = 0
+        strong_parameters["GaussianBlur"] = 0
 
-    #     optimizer_fea.step()
-    #     optimizer_cls.step()
-    #     meters.update(loss_seg=loss.item())
-    #     iteration += 1
+        mixed_label_0, _ = strongTransform(strong_parameters, data = torch.cat((src_label[0].unsqueeze(0), tgt_label[0].unsqueeze(0))))
+        strong_parameters["Mix"] = MixMask1
+        mixed_label_1, _ = strongTransform(strong_parameters, data = torch.cat((src_label[1].unsqueeze(0), tgt_label[1].unsqueeze(0))))
+        
+        mixed_label = torch.cat((mixed_label_0,mixed_label_1)).long()
 
-    #     batch_time = time.time() - end
-    #     end = time.time()
+        # unlabeled_weight = torch.sum(max_probs.ge(0.968).long() == 1).item() / np.size(np.array(mixed_label.cpu()))
+        # pixelWiseWeight = unlabeled_weight * torch.ones(max_probs.shape).cuda()
 
-    #     wandb.log({
-    #         "loss": loss.item(),
-    #         "lr": current_lr,
-    #         "batch_time": batch_time,
-    #     })
+        # onesWeights = torch.ones((pixelWiseWeight.shape)).cuda()
+        # strong_parameters["Mix"] = MixMask0
+        # _, pixelWiseWeight0 = strongTransform(strong_parameters, target = torch.cat((onesWeights[0].unsqueeze(0),pixelWiseWeight[0].unsqueeze(0))))
+        # strong_parameters["Mix"] = MixMask1
+        # _, pixelWiseWeight1 = strongTransform(strong_parameters, target = torch.cat((onesWeights[1].unsqueeze(0),pixelWiseWeight[1].unsqueeze(0))))
+        # pixelWiseWeight = torch.cat((pixelWiseWeight0,pixelWiseWeight1)).cuda()
 
-    #     meters.update(time=batch_time, data=data_time)
-    #     eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
-    #     eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
-    #     if iteration % 20 == 0 or iteration == max_iters:
-    #         logger.info(
-    #             meters.delimiter.join(
-    #                 [
-    #                     "eta: {eta}",
-    #                     "iter: {iter}",
-    #                     "{meters}",
-    #                     "lr: {lr:.6f}",
-    #                     "max mem: {memory:.2f} GB",
-    #                 ]
-    #             ).format(
-    #                 eta=eta_string,
-    #                 iter=iteration,
-    #                 meters=str(meters),
-    #                 lr=optimizer_fea.param_groups[0]["lr"],
-    #                 memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0 / 1024.0,
-    #             )
-    #         )
 
-    #     if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
-    #         mIoU_final, mAcc_final, allAcc_final = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
+        L_u = ce_criterion(mixed_seg_final, mixed_label) 
+        # L_u =  0.0 * unlabeled_loss(mixed_seg_final, mixed_label, pixelWiseWeight)
+        # # print(L_u)
+
+        loss = L_1 + 0.25 * L_u
+
+        # else :           
+        # loss = L_1
+
+        loss.backward()
+        optimizer_fea.step()
+        optimizer_cls.step()
+
+        if ema_feature_extractor is not None:
+            alpha_teacher = 0.999 
+            ema_model = update_ema_variables(ema_feature_extractor, ema_classifier, feature_extractor,classifier, alpha_teacher, iteration)
+
+
+        meters.update(loss_seg=loss.item())
+        iteration += 1
+
+        batch_time = time.time() - end
+        end = time.time()
+
+        wandb.log({
+            "loss": loss.item(),
+            "lr": current_lr,
+            "batch_time": batch_time,
+        })
+
+        meters.update(time=batch_time, data=data_time)
+        eta_seconds = meters.time.global_avg * (cfg.SOLVER.STOP_ITER - iteration)
+        eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+        if iteration % 20 == 0 or iteration == max_iters:
+            logger.info(
+                meters.delimiter.join(
+                    [
+                        "eta: {eta}",
+                        "iter: {iter}",
+                        "{meters}",
+                        "lr: {lr:.6f}",
+                        "max mem: {memory:.2f} GB",
+                    ]
+                ).format(
+                    eta=eta_string,
+                    iter=iteration,
+                    meters=str(meters),
+                    lr=optimizer_fea.param_groups[0]["lr"],
+                    memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0 / 1024.0,
+                )
+            )
+
+        if (iteration % cfg.SOLVER.CHECKPOINT_PERIOD == 0 or iteration == cfg.SOLVER.STOP_ITER):
+            mIoU_final, mAcc_final, allAcc_final = run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger)
             
-    #         feature_extractor['B'].train()
-    #         # feature_extractor['D'].train()
-    #         # feature_extractor['S'].train()
-    #         # feature_extractor['T'].train()
-    #         # feature_extractor['FS'].train()
-    #         classifier['S'].train()
-    #         # classifier['D'].train()
-    #         # classifier['T'].train()
-    #         # classifier['FS'].train()
+            feature_extractor['B'].train()
+            # feature_extractor['D'].train()
+            # feature_extractor['S'].train()
+            # feature_extractor['T'].train()
+            # feature_extractor['FS'].train()
+            classifier['S'].train()
+            # classifier['D'].train()
+            # classifier['T'].train()
+            # classifier['FS'].train()
 
-    #         if save_to_disk:
-    #             # update best model
-    #             if mIoU_final > best_mIoU:
-    #                 filename = os.path.join(output_dir, "model_best.pth")
-    #                 torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
-    #                     'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
-    #                     'optimizer_cls': optimizer_cls.state_dict()}, filename)
-    #                 best_mIoU = mIoU_final
-    #                 best_iteration = iteration
-    #             else:
-    #                 filename = os.path.join(output_dir, "model_current.pth")
-    #                 torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
-    #                     'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
-    #                     'optimizer_cls': optimizer_cls.state_dict()}, filename)
-    #             logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
+            if save_to_disk:
+                # update best model
+                if mIoU_final > best_mIoU:
+                    filename = os.path.join(output_dir, "model_best.pth")
+                    torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
+                        'classifier': classifier.state_dict(), 'ema_feature_extractor': ema_feature_extractor.state_dict(),
+                        'ema_classifier': ema_classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
+                        'optimizer_cls': optimizer_cls.state_dict()}, filename)
+                    best_mIoU = mIoU_final
+                    best_iteration = iteration
+                else:
+                    filename = os.path.join(output_dir, "model_current.pth")
+                    torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
+                        'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
+                        'optimizer_cls': optimizer_cls.state_dict()}, filename)
+                logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")
 
-    #         # Wandb Evaluation Log
-    #         wandb.log({
-    #             "Current Best mIoU": best_mIoU,
-    #             "allAcc_final": allAcc_final,
-    #             "mAcc_final": mAcc_final,
-    #             "mIoU_final": mIoU_final,
-    #         })
+            # Wandb Evaluation Log
+            wandb.log({
+                "Current Best mIoU": best_mIoU,
+                "allAcc_final": allAcc_final,
+                "mAcc_final": mAcc_final,
+                "mIoU_final": mIoU_final,
+            })
             
-    #         torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
 
-    #     if iteration == cfg.SOLVER.MAX_ITER:
-    #         break
-    #     if iteration == cfg.SOLVER.STOP_ITER:
-    #         break
+        if iteration == cfg.SOLVER.MAX_ITER:
+            break
+        if iteration == cfg.SOLVER.STOP_ITER:
+            break
 
-    # total_training_time = time.time() - start_training_time
-    # total_time_str = str(datetime.timedelta(seconds=total_training_time))
+    total_training_time = time.time() - start_training_time
+    total_time_str = str(datetime.timedelta(seconds=total_training_time))
 
-    # wandb.finish()
+    wandb.finish()
 
-    # logger.info(
-    #     "Total training time: {} ({:.4f} s / it)".format(
-    #         total_time_str, total_training_time / cfg.SOLVER.STOP_ITER
-    #     )
-    # )
+    logger.info(
+        "Total training time: {} ({:.4f} s / it)".format(
+            total_time_str, total_training_time / cfg.SOLVER.STOP_ITER
+        )
+    )
 
 def run_test(cfg, feature_extractor, classifier, local_rank, distributed, logger):
     if local_rank == 0:

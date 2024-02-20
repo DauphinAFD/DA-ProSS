@@ -3,7 +3,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+class CrossEntropyLoss2dPixelWiseWeighted(nn.Module):
+    def __init__(self, weight=None, ignore_index=250, reduction='none'):
+        super(CrossEntropyLoss2dPixelWiseWeighted, self).__init__()
+        self.CE =  nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, reduction=reduction)
 
+    def forward(self, output, target, pixelWiseWeight):
+        loss = self.CE(output, target)
+        loss = torch.mean(loss * pixelWiseWeight)
+        return loss
+    
 class PrototypeContrastiveLoss(nn.Module):
     def __init__(self, cfg):
         super(PrototypeContrastiveLoss, self).__init__()

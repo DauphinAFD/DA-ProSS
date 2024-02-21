@@ -91,19 +91,6 @@ def encode_segmap(mask):
             mask[mask == _validc] = class_map[_validc]
         return mask
 
-def colorJitter(colorJitter, img_mean, data = None, target = None, s=0.25):
-    # s is the strength of colorjitter
-    #colorJitter
-    if not (data is None):
-        if data.shape[1]==3:
-            if colorJitter > 0.2:
-                img_mean, _ = torch.broadcast_tensors(img_mean.unsqueeze(0).unsqueeze(2).unsqueeze(3), data)
-                seq = nn.Sequential(kornia.augmentation.ColorJitter(brightness=s,contrast=s,saturation=s,hue=s))
-                data = (data+img_mean)/255
-                data = seq(data)
-                data = (data*255-img_mean).float()
-    return data, target
-
 def generate_class_mask(pred, classes):
     pred, classes = torch.broadcast_tensors(pred.unsqueeze(0), classes.unsqueeze(1).unsqueeze(2))
     N = pred.eq(classes).sum(0)
@@ -267,8 +254,12 @@ def test(cfg, thres_const):
         tgt_input = tgt_input.cuda(non_blocking=True)
         tgt_label = tgt_label.cuda(non_blocking=True).long()
 
+        
+
         tgt_copy = tgt_input.clone()
+        tgt_copy = Fnorn.resize(tgt_copy, (512,1024), Image.BICUBIC)
         tgt_copy = Fnorn.normalize(tgt_copy, mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD)
+
         pred = inference(feature_extractor, classifier['FS'], tgt_copy, tgt_label, flip=False)
 
         pred = pred.cpu().numpy().squeeze()
@@ -330,7 +321,7 @@ def test(cfg, thres_const):
 
             # Iteration Controller
             k += 1
-
+            
             # save the pseudo label
             mask = get_color_pallete(mixed_label.squeeze(0).cpu().numpy(), "city")
             mask_filename = 'label_' + str(k).zfill(5) + '.png'
@@ -398,7 +389,6 @@ def main():
     # thres_const = get_threshold(cfg)
     thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
     test(cfg, thres_const)
-
 
 if __name__ == "__main__":
     main()

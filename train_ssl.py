@@ -110,8 +110,8 @@ def train(cfg, local_rank, distributed, logger):
         if "optimizer_cls" in checkpoint:
             logger.info("Loading optimizer_cls from {}".format(cfg.resume))
             optimizer_cls.load_state_dict(checkpoint['optimizer_cls'])
-        if "iteration" in checkpoint:
-            iteration = checkpoint['iteration']
+        # if "iteration" in checkpoint:
+        #     iteration = checkpoint['iteration']
 
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
 

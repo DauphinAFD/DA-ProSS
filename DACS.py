@@ -160,6 +160,7 @@ def get_threshold(cfg):
     for batch in tqdm(tgt_train_loader):
         x, _,_, name = batch
         tgt_input = x.cuda(non_blocking=True)
+        tgt_input = Fnorn.resize(tgt_input, (512,1024), Image.BICUBIC)
         tgt_size = tgt_input.shape[-2:]
         with torch.no_grad():
             tgt_feats_back = feature_extractor['B'](tgt_input)
@@ -386,8 +387,8 @@ def main():
     logger.info("Loaded configuration file {}".format(args.config_file))
     logger.info("Running with config:\n{}".format(cfg))
 
-    # thres_const = get_threshold(cfg)
-    thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
+    thres_const = get_threshold(cfg)
+    # thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
     test(cfg, thres_const)
 
 if __name__ == "__main__":

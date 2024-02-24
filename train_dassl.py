@@ -137,7 +137,7 @@ def train(cfg, local_rank, distributed, logger):
     mixed_trainloader_iter = iter(mixed_train_loader)
 
     pred_train_loader = torch.utils.data.DataLoader(
-        mixed_train_data,
+        pred_train_data,
         batch_size=batch_size,
         shuffle=(train_sampler is None),
         num_workers=4,
@@ -172,8 +172,8 @@ def train(cfg, local_rank, distributed, logger):
     best_mIoU = 0
     best_iteration = 0
 
-    mix_chance = 1.0
-    mix_rate = 0.05
+    mix_chance = 0
+    mix_rate = 0#0.05
     drip_counter = 0
 
     for i in range(cfg.SOLVER.STOP_ITER):
@@ -187,7 +187,7 @@ def train(cfg, local_rank, distributed, logger):
             else:
                 drip_counter += 1
 
-        if mix_chance > random.random():
+        if mix_chance >= random.random():
             try:
                 batch = next(mixed_trainloader_iter)
                 if batch[0].shape[0] != batch_size:

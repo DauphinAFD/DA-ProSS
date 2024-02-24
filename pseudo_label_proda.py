@@ -18,11 +18,14 @@ from core.utils.pseudo_label import PseudoLabel
 
 
 def strip_prefix_if_present(state_dict, prefix):
+    from collections import OrderedDict
     keys = sorted(state_dict.keys())
     if not all(key.startswith(prefix) for key in keys):
         return state_dict
     stripped_state_dict = OrderedDict()
     for key, value in state_dict.items():
+        if key.startswith(prefix + 'layer5'):
+            continue
         stripped_state_dict[key.replace(prefix, "")] = value
     return stripped_state_dict
 
@@ -146,13 +149,16 @@ def test(cfg, thres_const):
 
     classifier = build_classifier(cfg, TASKNAMES, NUM_CLASSES)
     classifier['S'].to(device)
+    distributed = False
 
     if cfg.resume:
         logger.info("Loading checkpoint from {}".format(cfg.resume))
         checkpoint = torch.load(cfg.resume, map_location=torch.device('cpu'))
-        feature_extractor_weights = strip_prefix_if_present(checkpoint['feature_extractor'], 'module.')
-        feature_extractor.load_state_dict(feature_extractor_weights)
-        classifier_weights = strip_prefix_if_present(checkpoint['classifier'], 'module.')
+        model_weights = checkpoint['feature_extractor'] if distributed else strip_prefix_if_present(
+            checkpoint['feature_extractor'], 'module.')
+        feature_extractor.load_state_dict(model_weights)
+        classifier_weights = checkpoint['classifier'] if distributed else strip_prefix_if_present(
+            checkpoint['classifier'], 'module.')
         classifier.load_state_dict(classifier_weights)
 
     feature_extractor['B'].eval()
@@ -212,7 +218,7 @@ def test(cfg, thres_const):
 
         # pred_copy = pred_label.copy()
         for i in range(cfg.MODEL.NUM_CLASSES):
-            pred_label[(pred_max < 0.9) * (pred_label == i)] = 255        
+            pred_label[(pred_max < thres_const[i]) * (pred_label == i)] = 255        
 
             
         output = torch.Tensor(pred_label).unsqueeze(dim = 0).cuda()
@@ -284,8 +290,8 @@ def main():
     logger.info("Loaded configuration file {}".format(args.config_file))
     logger.info("Running with config:\n{}".format(cfg))
 
-    # thres_const = get_threshold(cfg)
-    thres_const = np.load('results/synthia/r101_g2c_ours_proca_ssl/thres_const.npy')
+    thres_const = get_threshold(cfg)
+    # thres_const = np.load('results/synthia/r101_g2c_ours_proca_ssl/thres_const.npy')
     test(cfg, thres_const)
 
 

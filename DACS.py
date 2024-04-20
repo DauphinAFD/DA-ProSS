@@ -278,59 +278,126 @@ def test(cfg, thres_const):
             classes = torch.Tensor([item for item in classes if item in use_list]).cuda()
             nclasses = classes.shape[0]
 
+            classes_noselect = torch.unique(src_label[j]).cuda()
+            nclasses_noselect = classes_noselect.shape[0]
+
             if nclasses > 0:
                 classes = (classes[torch.Tensor(np.random.choice(nclasses, np.random.randint(1 , max(nclasses-2,2) ),replace=False)).long()])
-                mask_list = []
-                for i in range(len(classes)):
-                    mask_list.append(generate_class_mask(src_label[j], classes[i].unsqueeze(0)).unsqueeze(0))
+
+                classes_noselect = (classes_noselect[torch.Tensor(np.random.choice(nclasses_noselect, int((nclasses_noselect+nclasses_noselect%2)/2),replace=False)).long()])
+                classes_noselect = torch.cat((classes,classes_noselect)).unique()
+
+                # mask_list = []
+                # mask_list_nocont = []
+                # for i in range(len(classes)):
+                #     mask_list.append(generate_class_mask(src_label[j], classes[i].unsqueeze(0)).unsqueeze(0))
+                #     mask_list_nocont.append(generate_class_mask(src_label[j], classes[i].unsqueeze(0)).unsqueeze(0))
 
 
-                for i in range(len(mask_list)):
+                mask_list_noselect = []
+                for i in range(len(classes_noselect)):
+                    mask_list_noselect.append(generate_class_mask(src_label[j], classes_noselect[i].unsqueeze(0)).unsqueeze(0))
 
-                    masked_img = mask_list[i]
-                    masked_img = masked_img.squeeze(0).cpu().numpy()
-                    masked_img = masked_img.astype(np.uint8)
-                    masked_img = np.multiply(masked_img,255)
-                    contours, _ = cv2.findContours(masked_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                # for i in range(len(mask_list)):
 
-                    areas = []
-                    for cnt in contours:
-                        x, y, w, h = cv2.boundingRect(cnt)
-                        areas.append(w*h)
+                #     masked_img = mask_list[i]
+                #     masked_img = masked_img.squeeze(0).cpu().numpy()
+                #     masked_img = masked_img.astype(np.uint8)
+                #     masked_img = np.multiply(masked_img,255)
 
-                    max_area = max(areas)
-                    max_area = max(max_area, 2500)
-
-                    for cnt in contours:
-                        x, y, w, h = cv2.boundingRect(cnt)
-                        if(h*w < max_area/10):
-                            cv2.rectangle(masked_img, (x, y), (x+w, y+h), (0, 0, 0), -1)
+                #     masked_img_nocont = mask_list_nocont[i]
+                #     masked_img_nocont = masked_img_nocont.squeeze(0).cpu().numpy()
+                #     masked_img_nocont = masked_img_nocont.astype(np.uint8)
+                #     masked_img_nocont = np.multiply(masked_img_nocont,255)
                     
-                    mask_list[i] = torch.Tensor(masked_img/255)
+                #     contours, _ = cv2.findContours(masked_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-                final_mask = torch.zeros(mask_list[0].shape)
+                #     areas = []
+                #     for cnt in contours:
+                #         x, y, w, h = cv2.boundingRect(cnt)
+                #         areas.append(w*h)
 
-                for i in range(len(mask_list)):
-                    final_mask = torch.add(final_mask, mask_list[i])
+                #     max_area = max(areas)
+                #     max_area = max(max_area, 2500)
+
+                #     for cnt in contours:
+                #         x, y, w, h = cv2.boundingRect(cnt)
+                #         if(h*w < max_area/10):
+                #             cv2.rectangle(masked_img, (x, y), (x+w, y+h), (0, 0, 0), -1)
+                    
+                #     mask_list[i] = torch.Tensor(masked_img/255)
+                #     mask_list_nocont[i] = torch.Tensor(masked_img_nocont/255)
+
+                # final_mask = torch.zeros(mask_list[0].shape)
+                # for i in range(len(mask_list)):
+                #     final_mask = torch.add(final_mask, mask_list[i])
+
+                # final_mask_nocont = torch.zeros(mask_list_nocont[0].shape)
+                # for i in range(len(mask_list_nocont)):
+                #     final_mask_nocont = torch.add(final_mask_nocont, mask_list_nocont[i])
+
+                for i in range(len(mask_list_noselect)):
+
+                    masked_img_noselect = mask_list_noselect[i]
+                    masked_img_noselect = masked_img_noselect.squeeze(0).cpu().numpy()
+                    masked_img_noselect = masked_img_noselect.astype(np.uint8)
+                    masked_img_noselect = np.multiply(masked_img_noselect,255)
+                    
+                    mask_list_noselect[i] = torch.Tensor(masked_img_noselect/255)
+
+                final_mask_noselect = torch.zeros(mask_list_noselect[0].shape)
+                for i in range(len(mask_list_noselect)):
+                    final_mask_noselect = torch.add(final_mask_noselect, mask_list_noselect[i])
+
             else :
-                final_mask = torch.ones((src_label[j].shape))
+                # final_mask = torch.ones((src_label[j].shape))
+                # final_mask_nocont = torch.ones((src_label[j].shape))
+                final_mask_noselect = torch.ones((src_label[j].shape))
 
-            final_mask = final_mask.cuda()
-            strong_parameters = {"Mix": final_mask.unsqueeze(0)}
-            mixed_img, _ = strongTransform(strong_parameters, data = torch.cat((src_input[j].unsqueeze(0), tgt_input)))
-            mixed_label, _ = strongTransform(strong_parameters, data = torch.cat((src_label[j].unsqueeze(0), pred_label.unsqueeze(0))))
+            # final_mask = final_mask.cuda()
+            # strong_parameters = {"Mix": final_mask.unsqueeze(0)}
+            # mixed_img, _ = strongTransform(strong_parameters, data = torch.cat((src_input[j].unsqueeze(0), tgt_input)))
+            # mixed_label, _ = strongTransform(strong_parameters, data = torch.cat((src_label[j].unsqueeze(0), pred_label.unsqueeze(0))))
+
+            # final_mask_nocont = final_mask_nocont.cuda()
+            # strong_parameters_nocont = {"Mix": final_mask_nocont.unsqueeze(0)}
+            # mixed_img_nocont, _ = strongTransform(strong_parameters_nocont, data = torch.cat((src_input[j].unsqueeze(0), tgt_input)))
+            # mixed_label_nocont, _ = strongTransform(strong_parameters_nocont, data = torch.cat((src_label[j].unsqueeze(0), pred_label.unsqueeze(0))))
+
+            final_mask_noselect = final_mask_noselect.cuda()
+            strong_parameters_noselect = {"Mix": final_mask_noselect.unsqueeze(0)}
+            mixed_img_noselect, _ = strongTransform(strong_parameters_noselect, data = torch.cat((src_input[j].unsqueeze(0), tgt_input)))
+            mixed_label_noselect, _ = strongTransform(strong_parameters_noselect, data = torch.cat((src_label[j].unsqueeze(0), pred_label.unsqueeze(0))))
 
             # Iteration Controller
             k += 1
             
             # save the pseudo label
-            mask = get_color_pallete(mixed_label.squeeze(0).cpu().numpy(), "city")
-            mask_filename = 'label_' + str(k).zfill(5) + '.png'
-            mask.save(os.path.join(output_mask_folder, mask_filename))
+            # mask = get_color_pallete(mixed_label.squeeze(0).cpu().numpy(), "city")
+            # mask_filename = 'label_' + str(k).zfill(5) + '.png'
+            # mask.save(os.path.join(output_mask_folder, mask_filename))
 
-            mixed_img = Image.fromarray((mixed_img * 255).squeeze(0).permute(1,2,0).cpu().numpy().astype('uint8'))
+            # mixed_img = Image.fromarray((mixed_img * 255).squeeze(0).permute(1,2,0).cpu().numpy().astype('uint8'))
+            # img_filename = 'image_' + str(k).zfill(5) + '.png'
+            # mixed_img.save(os.path.join(output_img_folder, img_filename))
+
+
+            # mask = get_color_pallete(mixed_label_nocont.squeeze(0).cpu().numpy(), "city")
+            # mask_filename = 'label_' + str(k).zfill(5) + '.png'
+            # mask.save(os.path.join(os.path.join(cfg.OUTPUT_DIR, "mixed_soft_labels_nocont"), mask_filename))
+
+            # mixed_img_nocont = Image.fromarray((mixed_img_nocont * 255).squeeze(0).permute(1,2,0).cpu().numpy().astype('uint8'))
+            # img_filename = 'image_' + str(k).zfill(5) + '.png'
+            # mixed_img_nocont.save(os.path.join(os.path.join(cfg.OUTPUT_DIR, "mixed_images_nocont"), img_filename))
+
+
+            mask = get_color_pallete(mixed_label_noselect.squeeze(0).cpu().numpy(), "city")
+            mask_filename = 'label_' + str(k).zfill(5) + '.png'
+            mask.save(os.path.join(os.path.join(cfg.OUTPUT_DIR, "mixed_soft_labels"), mask_filename))
+
+            mixed_img_noselect = Image.fromarray((mixed_img_noselect * 255).squeeze(0).permute(1,2,0).cpu().numpy().astype('uint8'))
             img_filename = 'image_' + str(k).zfill(5) + '.png'
-            mixed_img.save(os.path.join(output_img_folder, img_filename))
+            mixed_img_noselect.save(os.path.join(os.path.join(cfg.OUTPUT_DIR, "mixed_images"), img_filename))
 
         mask = get_color_pallete(pred_label.cpu().numpy(), "city")
         mask_filename = name[0] if len(name[0].split("/")) < 2 else name[0].split("/")[-1]
@@ -340,6 +407,7 @@ def test(cfg, thres_const):
         intersection, union, target = intersectionAndUnionGPU(pred_copy, tgt_label, cfg.MODEL.NUM_CLASSES, cfg.INPUT.IGNORE_LABEL)
         intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
         intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
+
 
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
     accuracy_class = intersection_meter.sum / (target_meter.sum + 1e-10)
@@ -387,8 +455,8 @@ def main():
     logger.info("Loaded configuration file {}".format(args.config_file))
     logger.info("Running with config:\n{}".format(cfg))
 
-    thres_const = get_threshold(cfg)
-    # thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
+    # thres_const = get_threshold(cfg)
+    thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
     test(cfg, thres_const)
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ MODEL:
   THRESHOLD_PERCENT: 0.6
 DATASETS:
   SOURCE_TRAIN: "synthia_train"
-  TARGET_TRAIN: "cityscapes_train"
+  TARGET_TRAIN: "cityscapes_val"
   TEST: "cityscapes_val"
 INPUT:
   SOURCE_INPUT_SIZE_TRAIN: (1280, 760)

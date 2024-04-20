@@ -112,8 +112,8 @@ def train(cfg, local_rank, distributed, logger):
         if "optimizer_cls" in checkpoint:
             logger.info("Loading optimizer_cls from {}".format(cfg.resume))
             optimizer_cls.load_state_dict(checkpoint['optimizer_cls'])
-        if "iteration" in checkpoint:
-            iteration = checkpoint['iteration']
+        # if "iteration" in checkpoint:
+        #     iteration = checkpoint['iteration']
 
     # init data loader
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
@@ -143,16 +143,16 @@ def train(cfg, local_rank, distributed, logger):
 
     # Create prototypes
     feat_seg_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='S', cfg=cfg)
-    feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='D', cfg=cfg)
+    # feat_dep_estimator = prototype_dist_estimator(feature_num=feature_num, ptype='D', cfg=cfg)
     # merged_estimator = prototype_dist_estimator(feature_num=feature_num*2, cfg=cfg)
 
-    if cfg.SOLVER.MULTI_LEVEL:
+    # if cfg.SOLVER.MULTI_LEVEL:
         # out_seg_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='S', cfg=cfg)
         # out_trans_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='T', cfg=cfg)
-        out_final_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='F', cfg=cfg)
+        # out_final_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='F', cfg=cfg)
 
 
-    # iteration = 0
+    iteration = 0
     start_training_time = time.time()
     end = time.time()
     save_to_disk = local_rank == 0
@@ -318,9 +318,9 @@ def train(cfg, local_rank, distributed, logger):
         tgt_feats_final = tgt_feats_final.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, 2*A)
 
 
-        # Update feature-level prototype statistics
-        feat_dep_estimator.update(features=src_feats_trans.detach(), labels=src_mask)
-        feat_dep_estimator.update(features=tgt_feats_trans.detach(), labels=tgt_trans_mask)
+        # # Update feature-level prototype statistics
+        # feat_dep_estimator.update(features=src_feats_trans.detach(), labels=src_mask)
+        # feat_dep_estimator.update(features=tgt_feats_trans.detach(), labels=tgt_trans_mask)
 
         feat_seg_estimator.update(features=src_feats_seg.detach(), labels=src_mask)
         feat_seg_estimator.update(features=tgt_feats_seg.detach(), labels=tgt_seg_mask)
@@ -334,15 +334,15 @@ def train(cfg, local_rank, distributed, logger):
         loss_feat = pcl_criterion(Proto=feat_seg_estimator.Proto.detach(),
                                   feat=src_feats_seg,
                                   labels=src_mask) \
-                    + pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
-                                  feat=src_feats_trans,
-                                  labels=src_mask) \
                     + (0.5 * pcl_criterion(Proto=feat_seg_estimator.Proto.detach(),
-                                  feat=tgt_feats_seg,
-                                  labels=tgt_seg_mask)) \
-                    + (0.5 * pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
-                                  feat=tgt_feats_trans,
-                                  labels=tgt_trans_mask))
+                    feat=tgt_feats_seg,
+                    labels=tgt_seg_mask)) 
+                    # + pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
+                    #               feat=src_feats_trans,
+                    #               labels=src_mask) \
+                    # + (0.5 * pcl_criterion(Proto=feat_dep_estimator.Proto.detach(),
+                    #               feat=tgt_feats_trans,
+                    #               labels=tgt_trans_mask))
                     # + pcl_criterion(Proto=merged_estimator.Proto.detach(),
                     #               feat=tgt_feats_final,
                     #               labels=tgt_final_mask) \
@@ -355,56 +355,56 @@ def train(cfg, local_rank, distributed, logger):
 
 
         # Output level prototypes
-        if cfg.SOLVER.MULTI_LEVEL:
+        # if cfg.SOLVER.MULTI_LEVEL:
 
-            src_out_seg = src_out_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
-            tgt_out_seg = tgt_out_seg.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
+        #     src_out_seg = src_out_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
+        #     tgt_out_seg = tgt_out_seg.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
             
-            src_out_trans = src_out_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
-            tgt_out_trans = tgt_out_trans.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
+        #     src_out_trans = src_out_trans.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
+        #     tgt_out_trans = tgt_out_trans.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
             
-            src_out_final_seg = src_out_final_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
-            tgt_out_final_seg = tgt_out_final_seg.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
-
-            
-            # update output-level statistics
-            # out_seg_estimator.update(features=tgt_out_seg.detach(), labels=tgt_seg_mask)
-            # out_seg_estimator.update(features=src_out_seg.detach(), labels=src_mask)
-
-            # out_trans_estimator.update(features=tgt_out_trans.detach(), labels=tgt_trans_mask)
-            # out_trans_estimator.update(features=src_out_trans.detach(), labels=src_mask)
-            
-            out_final_estimator.update(features=tgt_out_final_seg.detach(), labels=tgt_final_mask)
-            out_final_estimator.update(features=src_out_final_seg.detach(), labels=src_mask)
+        #     src_out_final_seg = src_out_final_seg.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, cfg.MODEL.NUM_CLASSES)
+        #     tgt_out_final_seg = tgt_out_final_seg.permute(0, 2, 3, 1).contiguous().view(B * Ht * Wt, cfg.MODEL.NUM_CLASSES)
 
             
-            # the proposed contrastive loss on prediction map
-            # loss_out = pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
-            #                          feat=src_out_seg,
-            #                          labels=src_mask) \
-            #            + pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
-            #                            feat=tgt_out_seg,
-            #                            labels=tgt_seg_mask) \
-            #            + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
-            #                          feat=src_out_trans,
-            #                          labels=src_mask) \
-            #            + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
-            #                            feat=tgt_out_trans,
-            #                            labels=tgt_trans_mask) \
-            loss_out =  pcl_criterion(Proto=out_final_estimator.Proto.detach(),
-                                     feat=src_out_final_seg,
-                                     labels=src_mask) \
-                       + (0.5 * pcl_criterion(Proto=out_final_estimator.Proto.detach(),
-                                       feat=tgt_out_final_seg,
-                                       labels=tgt_final_mask))
-            
-            meters.update(loss_out=loss_out.item())
+        #     # update output-level statistics
+        #     # out_seg_estimator.update(features=tgt_out_seg.detach(), labels=tgt_seg_mask)
+        #     # out_seg_estimator.update(features=src_out_seg.detach(), labels=src_mask)
 
-            loss = loss_sup \
-                   + cfg.SOLVER.LAMBDA_FEAT * loss_feat \
-                   + cfg.SOLVER.LAMBDA_OUT * loss_out
-        else:
-            loss = loss_sup + cfg.SOLVER.LAMBDA_FEAT * loss_feat
+        #     # out_trans_estimator.update(features=tgt_out_trans.detach(), labels=tgt_trans_mask)
+        #     # out_trans_estimator.update(features=src_out_trans.detach(), labels=src_mask)
+            
+        #     out_final_estimator.update(features=tgt_out_final_seg.detach(), labels=tgt_final_mask)
+        #     out_final_estimator.update(features=src_out_final_seg.detach(), labels=src_mask)
+
+            
+        #     # the proposed contrastive loss on prediction map
+        #     # loss_out = pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
+        #     #                          feat=src_out_seg,
+        #     #                          labels=src_mask) \
+        #     #            + pcl_criterion(Proto=out_seg_estimator.Proto.detach(),
+        #     #                            feat=tgt_out_seg,
+        #     #                            labels=tgt_seg_mask) \
+        #     #            + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
+        #     #                          feat=src_out_trans,
+        #     #                          labels=src_mask) \
+        #     #            + pcl_criterion(Proto=out_trans_estimator.Proto.detach(),
+        #     #                            feat=tgt_out_trans,
+        #     #                            labels=tgt_trans_mask) \
+        #     loss_out =  pcl_criterion(Proto=out_final_estimator.Proto.detach(),
+        #                              feat=src_out_final_seg,
+        #                              labels=src_mask) \
+        #                + (0.5 * pcl_criterion(Proto=out_final_estimator.Proto.detach(),
+        #                                feat=tgt_out_final_seg,
+        #                                labels=tgt_final_mask))
+            
+        #     meters.update(loss_out=loss_out.item())
+
+        #     loss = loss_sup \
+        #            + cfg.SOLVER.LAMBDA_FEAT * loss_feat \
+        #            + cfg.SOLVER.LAMBDA_OUT * loss_out
+        # else:
+        loss = loss_sup + cfg.SOLVER.LAMBDA_FEAT * loss_feat
 
 
 
@@ -423,7 +423,7 @@ def train(cfg, local_rank, distributed, logger):
             "loss": loss.item(),
             "loss_sup": loss_sup.item(),
             "loss_feat": loss_feat.item(),
-            "loss_out": loss_out.item(),
+            # "loss_out": loss_out.item(),
             "lr": current_lr,
             "batch_time": batch_time,
         })

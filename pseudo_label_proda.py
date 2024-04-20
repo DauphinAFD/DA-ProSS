@@ -218,7 +218,7 @@ def test(cfg, thres_const):
 
         # pred_copy = pred_label.copy()
         for i in range(cfg.MODEL.NUM_CLASSES):
-            pred_label[(pred_max < thres_const[i]) * (pred_label == i)] = 255        
+            pred_label[(pred_max < 0.9) * (pred_label == i)] = 255        
 
             
         output = torch.Tensor(pred_label).unsqueeze(dim = 0).cuda()
@@ -290,8 +290,8 @@ def main():
     logger.info("Loaded configuration file {}".format(args.config_file))
     logger.info("Running with config:\n{}".format(cfg))
 
-    thres_const = get_threshold(cfg)
-    # thres_const = np.load('results/synthia/r101_g2c_ours_proca_ssl/thres_const.npy')
+    # thres_const = get_threshold(cfg)
+    thres_const = np.load('results/synthia/r101_g2c_ours_proca_ssl/thres_const.npy')
     test(cfg, thres_const)
 
 

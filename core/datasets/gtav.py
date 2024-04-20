@@ -4,6 +4,7 @@ import numpy as np
 from torch.utils import data
 from PIL import Image, ImageFile
 import pickle
+import cv2
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -65,6 +66,7 @@ class GTAVDataSet(data.Dataset):
                 {
                     "img": os.path.join(self.data_root, "images/%s" % name),
                     "label": os.path.join(self.data_root, "labels/%s" % name),
+                    "depth": os.path.join(self.data_root, "depth/%s" % name),
                     "name": name,
                 }
             )
@@ -118,6 +120,7 @@ class GTAVDataSet(data.Dataset):
 
     def __len__(self):
         return len(self.data_list)
+    
 
     def __getitem__(self, index):
         if self.debug:
@@ -126,6 +129,8 @@ class GTAVDataSet(data.Dataset):
 
         image = Image.open(datafiles["img"]).convert('RGB')
         label = np.array(Image.open(datafiles["label"]), dtype=np.float32)
+        depth = cv2.imread(datafiles["depth"], flags=cv2.IMREAD_ANYDEPTH).astype(np.float32)/256.  + 1.
+
         name = datafiles["name"]
 
         # re-assign labels to match the format of Cityscapes
@@ -135,6 +140,6 @@ class GTAVDataSet(data.Dataset):
         label = Image.fromarray(label_copy)
 
         if self.transform is not None:
-            image, label = self.transform(image, label)
+            image, label, depth = self.transform(image, label, depth)
 
-        return image, label, name
+        return image, label, depth, name

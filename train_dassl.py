@@ -113,11 +113,20 @@ def train(cfg, local_rank, distributed, logger):
             optimizer_cls.load_state_dict(checkpoint['optimizer_cls'])
         if "iteration" in checkpoint:
             iteration = checkpoint['iteration']
+        # if "mix_chance" in checkpoint :
+        #     mix_chance = checkpoint['mix_chance']
+        # if "mix_rate" in checkpoint :
+        #     mix_rate = checkpoint['mix_rate']
+        # if "drip_counter" in checkpoint :
+        #     drip_counter = checkpoint['drip_counter']
 
     mixed_train_data = build_dataset(cfg, mode='mixed', is_source=True)
     pred_train_data = build_dataset(cfg, mode='mixed', is_source=False)
 
-    print(iteration)
+    # print(iteration)
+    # print(mix_chance)
+    # print(mix_rate)
+    # print(drip_counter)
 
     # if distributed:
     #     train_sampler = torch.utils.data.distributed.DistributedSampler(src_train_data)
@@ -172,15 +181,15 @@ def train(cfg, local_rank, distributed, logger):
     best_mIoU = 0
     best_iteration = 0
 
-    mix_chance = 0
-    mix_rate = 0#0.05
+    mix_chance = 1.0
+    mix_rate = 0.0
     drip_counter = 0
 
     for i in range(cfg.SOLVER.STOP_ITER):
     # for i, (src_input, src_label, _, name) in enumerate(train_loader):
         data_time = time.time() - end
 
-        if iteration > 30000:
+        if iteration > 100000:
             if drip_counter >= 1000:
                 drip_counter = 0
                 mix_chance -= mix_rate
@@ -298,14 +307,14 @@ def train(cfg, local_rank, distributed, logger):
                 # update best model
                 if mIoU_final > best_mIoU:
                     filename = os.path.join(output_dir, "model_best.pth")
-                    torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
+                    torch.save({'iteration': iteration, 'mix_chance':mix_chance, 'mix_rate': mix_rate, 'drip_counter': drip_counter, 'feature_extractor': feature_extractor.state_dict(),
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
                     best_mIoU = mIoU_final
                     best_iteration = iteration
                 else:
                     filename = os.path.join(output_dir, "model_current.pth")
-                    torch.save({'iteration': iteration, 'feature_extractor': feature_extractor.state_dict(),
+                    torch.save({'iteration': iteration, 'mix_chance':mix_chance, 'mix_rate': mix_rate, 'drip_counter': drip_counter, 'feature_extractor': feature_extractor.state_dict(),
                         'classifier': classifier.state_dict(), 'optimizer_fea': optimizer_fea.state_dict(),
                         'optimizer_cls': optimizer_cls.state_dict()}, filename)
                 logger.info(f"-------- Best mIoU {best_mIoU} at iteration {best_iteration} --------")

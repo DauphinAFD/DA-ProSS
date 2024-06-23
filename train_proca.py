@@ -50,7 +50,7 @@ def train(cfg, local_rank, distributed, logger):
     )
 
     device = torch.device(cfg.MODEL.DEVICE)
-    NUM_CLASSES = {"S": 16, "D": 1}
+    NUM_CLASSES = {"S": 19, "D": 1}
     TASKNAMES = ["S", "D"]
 
     # create network
@@ -112,8 +112,8 @@ def train(cfg, local_rank, distributed, logger):
         if "optimizer_cls" in checkpoint:
             logger.info("Loading optimizer_cls from {}".format(cfg.resume))
             optimizer_cls.load_state_dict(checkpoint['optimizer_cls'])
-        # if "iteration" in checkpoint:
-        #     iteration = checkpoint['iteration']
+        if "iteration" in checkpoint:
+            iteration = checkpoint['iteration']
 
     # init data loader
     src_train_data = build_dataset(cfg, mode='train', is_source=True)
@@ -152,7 +152,7 @@ def train(cfg, local_rank, distributed, logger):
         # out_final_estimator = prototype_dist_estimator(feature_num=cfg.MODEL.NUM_CLASSES, ptype='F', cfg=cfg)
 
 
-    iteration = 0
+    # iteration = 0 Do not forget to change it
     start_training_time = time.time()
     end = time.time()
     save_to_disk = local_rank == 0

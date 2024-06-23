@@ -286,8 +286,8 @@ def main():
     logger.info("Loaded configuration file {}".format(args.config_file))
     logger.info("Running with config:\n{}".format(cfg))
 
-    thres_const = get_threshold(cfg)
-    # thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
+    # thres_const = get_threshold(cfg)
+    thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
     test(cfg, thres_const)
 
 

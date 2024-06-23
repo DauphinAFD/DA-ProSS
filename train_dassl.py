@@ -37,7 +37,7 @@ def strip_prefix_if_present(state_dict, prefix):
 def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
 
-    NUM_CLASSES = {"S": 16, "D": 1}
+    NUM_CLASSES = {"S": 19, "D": 1}
     TASKNAMES = ["S", "D"]
 
     run = wandb.init(
@@ -111,8 +111,8 @@ def train(cfg, local_rank, distributed, logger):
         if "optimizer_cls" in checkpoint:
             logger.info("Loading optimizer_cls from {}".format(cfg.resume))
             optimizer_cls.load_state_dict(checkpoint['optimizer_cls'])
-        if "iteration" in checkpoint:
-            iteration = checkpoint['iteration']
+        # if "iteration" in checkpoint:
+        #     iteration = checkpoint['iteration']
         # if "mix_chance" in checkpoint :
         #     mix_chance = checkpoint['mix_chance']
         # if "mix_rate" in checkpoint :

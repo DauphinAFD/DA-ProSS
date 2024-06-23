@@ -42,7 +42,7 @@ def strip_prefix_if_present(state_dict, prefix):
 
 def train(cfg, local_rank, distributed, logger):
     logger.info("Start training")
-    NUM_CLASSES = {"S": 16, "D": 1}
+    NUM_CLASSES = {"S": 19, "D": 1}
     TASKNAMES = ["S", "D"]
 
     run = wandb.init(
@@ -169,6 +169,7 @@ def train(cfg, local_rank, distributed, logger):
 
     for i, (src_input, src_seg_label, src_depth_label, _) in enumerate(train_loader):
         data_time = time.time() - end
+
 
         optimizer_fea.zero_grad()
         # optimizer_fea_depth.zero_grad()

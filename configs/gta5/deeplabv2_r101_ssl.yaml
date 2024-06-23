@@ -4,6 +4,8 @@ MODEL:
   FREEZE_BN: False
 DATASETS:
   SOURCE_TRAIN: "cityscapes_train_soft"
+  SOURCE_TRAIN1: "mixed"
+  SOURCE_TRAIN2: "cityscapes_train_soft"
   TEST: "cityscapes_val"
 INPUT:
   SOURCE_INPUT_SIZE_TRAIN: (1024, 512)
@@ -18,6 +20,6 @@ INPUT:
   GAUSSIANBLUR: True
 SOLVER:
   BASE_LR: 5e-4
-  MAX_ITER: 90000
-  STOP_ITER: 90000
-  BATCH_SIZE: 8
+  MAX_ITER: 360000
+  STOP_ITER: 360000
+  BATCH_SIZE: 2

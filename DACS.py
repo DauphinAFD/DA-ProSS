@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.transforms import functional as Fnorn
 import torch.backends.cudnn
-import kornia
+# import kornia
 import matplotlib.pyplot as plt
 from core.configs import cfg
 from core.datasets import build_dataset
@@ -118,7 +118,7 @@ def strongTransform(parameters, data=None, target=None):
 def get_threshold(cfg):
     logger = logging.getLogger("pseudo_label.trainer")
     logger.info("Start inference on target dataset and get threshold of each class")
-    NUM_CLASSES = {"S": 16, "D": 1}
+    NUM_CLASSES = {"S": 19, "D": 1}
     TASKNAMES = ["S", "D"]
     device = torch.device(cfg.MODEL.DEVICE)
     feature_extractor = build_feature_extractor(cfg, TASKNAMES)
@@ -180,7 +180,7 @@ def get_threshold(cfg):
 def test(cfg, thres_const):
     logger = logging.getLogger("pseudo_label.tester")
     logger.info("Start testing")
-    NUM_CLASSES = {"S": 16, "D": 1}
+    NUM_CLASSES = {"S": 19, "D": 1}
     TASKNAMES = ["S", "D"]
     device = torch.device(cfg.MODEL.DEVICE)
 
@@ -261,12 +261,16 @@ def test(cfg, thres_const):
         tgt_copy = Fnorn.resize(tgt_copy, (512,1024), Image.BICUBIC)
         tgt_copy = Fnorn.normalize(tgt_copy, mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD)
 
+        
+
         pred = inference(feature_extractor, classifier['FS'], tgt_copy, tgt_label, flip=False)
 
         pred = pred.cpu().numpy().squeeze()
         pred_max = np.max(pred, 0)
         pred_label = pred.argmax(0)
         pred_copy = pred_label.copy()
+
+        
         for i in range(cfg.MODEL.NUM_CLASSES):
             pred_label[(pred_max < thres_const[i]) * (pred_label == i)] = 255
 
@@ -274,7 +278,7 @@ def test(cfg, thres_const):
         for j in range(len(src_input)) :
 
             classes = torch.unique(src_label[j])
-            use_list = [5, 7, 10, 11, 12, 14, 15]
+            use_list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
             classes = torch.Tensor([item for item in classes if item in use_list]).cuda()
             nclasses = classes.shape[0]
 
@@ -404,6 +408,7 @@ def test(cfg, thres_const):
         mask.save(os.path.join(output_folder, mask_filename))
 
         pred_copy = torch.Tensor(pred_copy).unsqueeze(dim = 0).cuda()
+
         intersection, union, target = intersectionAndUnionGPU(pred_copy, tgt_label, cfg.MODEL.NUM_CLASSES, cfg.INPUT.IGNORE_LABEL)
         intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
         intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
@@ -456,7 +461,7 @@ def main():
     logger.info("Running with config:\n{}".format(cfg))
 
     # thres_const = get_threshold(cfg)
-    thres_const = np.load('results/synthia/r101_g2c_ours_proca/thres_const.npy')
+    thres_const = np.load('results/gta5/r101_g2c_ours_proca/thres_const.npy')
     test(cfg, thres_const)
 
 if __name__ == "__main__":

@@ -74,7 +74,7 @@ def transform_color(pred):
 def get_threshold(cfg):
     logger = logging.getLogger("pseudo_label.trainer")
     logger.info("Start inference on target dataset and get threshold of each class")
-    NUM_CLASSES = {"S": 16, "D": 1}
+    NUM_CLASSES = {"S": 19, "D": 1}
     TASKNAMES = ["S", "D"]
     device = torch.device(cfg.MODEL.DEVICE)
     feature_extractor = build_feature_extractor(cfg, TASKNAMES)
@@ -136,7 +136,7 @@ def get_threshold(cfg):
 def test(cfg, thres_const):
     logger = logging.getLogger("pseudo_label.tester")
     logger.info("Start testing")
-    NUM_CLASSES = {"S": 16, "D": 1}
+    NUM_CLASSES = {"S": 19, "D": 1}
     TASKNAMES = ["S", "D"]
     device = torch.device(cfg.MODEL.DEVICE)
 
@@ -291,7 +291,7 @@ def main():
     logger.info("Running with config:\n{}".format(cfg))
 
     # thres_const = get_threshold(cfg)
-    thres_const = np.load('results/synthia/r101_g2c_ours_proca_ssl/thres_const.npy')
+    thres_const = np.load('results/gta5/r101_g2c_ours_proca_ssl/thres_const.npy')
     test(cfg, thres_const)
 
 

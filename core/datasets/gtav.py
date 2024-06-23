@@ -66,7 +66,7 @@ class GTAVDataSet(data.Dataset):
                 {
                     "img": os.path.join(self.data_root, "images/%s" % name),
                     "label": os.path.join(self.data_root, "labels/%s" % name),
-                    "depth": os.path.join(self.data_root, "depth/%s" % name),
+                    "depth": os.path.join(self.data_root, "depth/disparity/%s" % name),
                     "name": name,
                 }
             )
@@ -129,7 +129,8 @@ class GTAVDataSet(data.Dataset):
 
         image = Image.open(datafiles["img"]).convert('RGB')
         label = np.array(Image.open(datafiles["label"]), dtype=np.float32)
-        depth = cv2.imread(datafiles["depth"], flags=cv2.IMREAD_ANYDEPTH).astype(np.float32)/256.  + 1.
+
+        depth = np.array(cv2.imread(datafiles["depth"], flags=cv2.IMREAD_ANYDEPTH), dtype=np.float32)/256.  + 1.
 
         name = datafiles["name"]
 

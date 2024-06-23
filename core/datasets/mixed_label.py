@@ -27,7 +27,7 @@ class MixedLabelDataset(data.Dataset):
         self.data_list = []
 
 
-        for root, dirs, files in os.walk("results/synthia/r101_g2c_ours_proca/mixed_images"):
+        for root, dirs, files in os.walk("results/gta5/r101_g2c_ours_proca/mixed_images"):
             for file in files:
                 if file.endswith(".png"):
                     fpath = os.path.join(root, file)

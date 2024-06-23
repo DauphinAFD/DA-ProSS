@@ -48,7 +48,7 @@ def prototype_dist_init(cfg, logger):
 
     device = torch.device(cfg.MODEL.DEVICE)
 
-    NUM_CLASSES = {"S": 16, "D": 1}
+    NUM_CLASSES = {"S": 19, "D": 1}
     TASKNAMES = ["S", "D"]
     
     feature_extractor = build_feature_extractor(cfg, TASKNAMES)

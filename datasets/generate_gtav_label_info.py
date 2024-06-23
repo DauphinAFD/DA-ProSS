@@ -5,6 +5,7 @@ import pickle
 from PIL import Image
 from tqdm import tqdm
 from multiprocessing import Pool
+
 parser = argparse.ArgumentParser(description="Generate label stat info")
 parser.add_argument("-d",
                     "--datadir",
@@ -30,6 +31,7 @@ labdir = os.path.join(args.datadir, 'labels')
 labfiles = os.listdir(labdir)
 nprocs = args.nprocs
 savedir = args.output_dir
+
 
 ignore_label = 255
 id_to_trainid = {7: 0, 8: 1, 11: 2, 12: 3, 13: 4, 17: 5,
